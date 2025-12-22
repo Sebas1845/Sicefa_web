@@ -1,0 +1,65 @@
+####################################
+# Entorno / Seguridad
+####################################
+.env
+.env.*
+.phpunit.result.cache
+
+####################################
+# Dependencias (se instalan luego)
+####################################
+/vendor/
+/node_modules/
+
+####################################
+# Frontend / hot reload
+####################################
+/public/hot
+
+####################################
+# Logs y caché runtime
+####################################
+/storage/logs/
+/storage/framework/cache/
+/storage/framework/sessions/
+/storage/framework/views/
+/bootstrap/cache/*.php
+
+####################################
+# Uploads / Imágenes / Evidencias
+####################################
+/public/storage
+/public/uploads
+/public/modules/**/files
+/storage/app/public
+
+####################################
+# Logs temporales
+####################################
+npm-debug.log
+yarn-error.log
+
+####################################
+# IDE / Editor
+####################################
+/.idea/
+/.vscode/
+
+####################################
+# Sistema Operativo
+####################################
+.DS_Store
+Thumbs.db
+
+####################################
+# Archivos que SÍ deben subirse
+####################################
+!composer.json
+!composer.lock
+!package.json
+!package-lock.json
+!vite.config.*
+!webpack.mix.js
+
+.vs/
+desktop.ini
