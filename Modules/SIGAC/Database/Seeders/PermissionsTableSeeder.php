@@ -1041,6 +1041,90 @@ $permissions_security_personnel[] = $permission->id; // Almacenar permiso para r
         ]);
         $permissions_instructor[] = $permission->id; // Almacenar permiso para rol
 
+
+      // ASISTENCIA (Duvan Trujillo 2025)
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.instructor.attendancesrecord.index'], [ // permiso para la vista del instructor 
+            'name' => 'Vista registro de asistencia (Instructor)',
+            'description' => 'Acceder a la vista de registro de asistencia',
+            'description_english' => "Access the attendance record view",
+            'app_id' => $app->id
+        ]);
+        $permissions_instructor[] = $permission->id; // Almacenar permiso para rol
+
+
+
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.instructor.attendancesrecord.refresh'], // Registro o actualización de permiso
+    [
+        'name' => 'Refrescar lista de aprendices (Instructor)',
+        'description' => 'Permite cargar dinámicamente los aprendices según la fecha y hora seleccionadas sin recargar la página.',
+        'description_english' => 'Allows dynamically loading trainees based on the selected date and time without reloading the page.',
+        'app_id' => $app->id
+    ]
+);
+
+$permissions_instructor[] = $permission->id; // Almacenar permiso para rol
+
+
+
+
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.instructor.attendancesrecord.store'], // Registro de asistencias
+    [
+        'name' => 'Registrar asistencia de aprendices (Instructor)',
+        'description' => 'Permite al instructor registrar la asistencia de los aprendices según la fecha y hora seleccionadas.',
+        'description_english' => 'Allows the instructor to record trainees\' attendance based on the selected date and time.',
+
+        'app_id' => $app->id
+    ]
+);
+
+$permissions_instructor[] = $permission->id; // Almacenar permiso para rol
+
+
+
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.instructor.attendancesrecord.update'], // permiso para la vista de editar asistencia
+    [
+        'name' => 'Vista editar asistencia (Instructor)',
+        'description' => 'Permite al instructor modificar registros de asistencia', // <-- descripción actualizada
+        'description_english' => "Allows the instructor to modify attendance records", // <-- inglés actualizado
+        'app_id' => $app->id
+    ]
+);
+
+$permissions_instructor[] = $permission->id; // Almacenar permiso para rol
+
+
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.academic_coordination.attendancesrecord.view_edit_page'],
+    [
+        'name' => 'Vista de edición de asistencia (Coordinación Académica)',
+        'description' => 'Permite a Coordinación Académica acceder a la página de edición de registros de asistencia',
+        'description_english' => 'Allows Academic Coordination to access the attendance edit page',
+        'app_id' => $app->id
+    ]
+);
+  $permissions_academic_coordination[] = $permission->id;
+
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.academic_coordination.attendancesrecord.edit'],
+    [
+        'name' => 'Editar asistencias (Coordinación Académica)',
+        'description' => 'Permite a Coordinación Académica editar los registros de asistencia',
+        'description_english' => 'Allows Academic Coordination to edit attendance records',
+        'app_id' => $app->id
+    ]
+);
+
+$permissions_academic_coordination[] = $permission->id;
+
+
+
+
+
+
         // Table solicitar programa (Instructor)
         $permission = Permission::updateOrCreate(['slug' => 'sigac.instructor.programming.program_request.table'], [ // Registro o actualización de permiso
             'name' => 'Tabla solicitar programa (Instructor)',

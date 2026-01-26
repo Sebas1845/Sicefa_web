@@ -142,7 +142,7 @@
                             <ul class="nav nav-treeview items" style="display: none;">
                                 @if (Auth::user()->havePermission('sigac.academic_coordination.visitrequest.index'))
                                     <li class="nav-item">
-                                        <a href="{{route('sigac.academic_coordination.visitrequest.index') }}"
+                                        <a href="{{ route('sigac.academic_coordination.visitrequest.index') }}"
                                             class="nav-link {{ Route::is('sigac.academic_coordination.visitrequest.*') ? 'active' : '' }}">
                                             <i class="nav-icon fas fa-list"></i>
                                             <p>{{ trans('sigac::general.Requests') }}</p>
@@ -151,7 +151,7 @@
                                 @endif
                                 @if (Auth::user()->havePermission('sigac.academic_coordination.visitrequest.create'))
                                     <li class="nav-item">
-                                        <a href="{{route('sigac.academic_coordination.visitrequest.create') }}"
+                                        <a href="{{ route('sigac.academic_coordination.visitrequest.create') }}"
                                             class="nav-link {{ Route::is('sigac.academic_coordination.visitrequest.*') ? 'active' : '' }}">
                                             <i class="nav-icon fas fa-list"></i>
                                             <p>{{ trans('sigac::general.Create_Request') }}</p>
@@ -160,7 +160,7 @@
                                 @endif
                                 @if (Auth::user()->havePermission('sigac.academic_coordination.visitschedule.calendar.general'))
                                     <li class="nav-item">
-                                        <a href="{{route('sigac.academic_coordination.visitschedule.calendar.general') }}"
+                                        <a href="{{ route('sigac.academic_coordination.visitschedule.calendar.general') }}"
                                             class="nav-link {{ Route::is('sigac.academic_coordination.visitschedule.*') ? 'active' : '' }}">
                                             <i class="nav-icon fas fa-list"></i>
                                             <p>{{ trans('sigac::general.Calendar') }}</p>
@@ -407,6 +407,7 @@
                                     </li>
                                 </ul>
                             </li>
+                            {{-- Duvan Trujillo 2026 --}}
                             <li class="nav-item">
                                 <a href="#" class="nav-link">
                                     <i class="nav-icon fas fa-book"></i>
@@ -434,6 +435,24 @@
                                     </li>
                                 </ul>
                             </li>
+                            <li class="nav-item">
+                            <a href="#" class="nav-link">
+                                <i class="nav-icon fas fa-address-book"></i>
+                                <p>
+                                    Asistencias
+                                    <i class="right fas fa-angle-left"></i>
+                                </p>
+                            </a>
+                            <ul class="nav nav-treeview">
+                                <li class="nav-item">
+                                    <a href="{{ route('sigac.academic_coordination.attendancesrecord.view_edit_page') }}"
+                                        class="nav-link">
+                                        <i class="nav-icon fas fa-pen"></i>
+                                        <p>Registrar Asistencia</p>
+                                    </a>
+                                </li>
+                            </ul>
+                        </li>
                         @endif
                     @endif
 
@@ -615,6 +634,27 @@
                                 </li>
                             </ul>
                         </li>
+                        </li>
+                        {{-- Duvan Trujillo 2026 --}}
+                        <li class="nav-item">
+                            <a href="#" class="nav-link">
+                                <i class="nav-icon fas fa-address-book"></i>
+                                <p>
+                                    Asistencias
+                                    <i class="right fas fa-angle-left"></i>
+                                </p>
+                            </a>
+                            <ul class="nav nav-treeview">
+                                <li class="nav-item">
+                                    <a href="{{ route('sigac.instructor.attendancesrecord.index') }}"
+                                        class="nav-link">
+                                        <i class="nav-icon fas fa-pen"></i>
+                                        <p>Registrar Asistencia</p>
+                                    </a>
+                                </li>
+                            </ul>
+                        </li>
+
                     @endif
 
 
@@ -888,29 +928,29 @@
 
                     {{-- Verifica si el usuario tiene el permiso "sigac.securitypersonnel.dashboard" --}}
                     @if (Route::is('sigac.securitypersonnel.*'))
-                            @if (Auth::user()->havePermission('sigac.securitypersonnel.dashboard'))
-                                <li class="nav-item">
-                                <li class="nav-item">
-                                    <a href="#" class="nav-link">
-                                        <i class="nav-icon fas fa-book"></i>
-                                        <p>
-                                            Solicitudes permisos
-                                            <i class="right fas fa-angle-left"></i>
-                                        </p>
-                                    </a>
-                                    <ul class="nav nav-treeview items">
-                                        <li class="nav-item">
-                                            <a href="{{ route('sigac.security.personnel.permission.index') }}"
-                                                class="nav-link">
-                                                <i class="nav-icon fas fa-file-invoice"></i>
-                                                <p>Solicitud</p>
-                                            </a>
-                                        </li>
-                                    </ul>
-                                </li>
-                                </li>
-                            @endif
-                            @endif
+                        @if (Auth::user()->havePermission('sigac.securitypersonnel.dashboard'))
+                            <li class="nav-item">
+                            <li class="nav-item">
+                                <a href="#" class="nav-link">
+                                    <i class="nav-icon fas fa-book"></i>
+                                    <p>
+                                        Solicitudes permisos
+                                        <i class="right fas fa-angle-left"></i>
+                                    </p>
+                                </a>
+                                <ul class="nav nav-treeview items">
+                                    <li class="nav-item">
+                                        <a href="{{ route('sigac.security.personnel.permission.index') }}"
+                                            class="nav-link">
+                                            <i class="nav-icon fas fa-file-invoice"></i>
+                                            <p>Solicitud</p>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+                            </li>
+                        @endif
+                    @endif
 
                 </ul>
             </nav>

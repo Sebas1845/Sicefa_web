@@ -51,4 +51,12 @@ class InstructorProgram extends Model implements Auditable
     {
         return $this->hasMany(InstructorProgramOutcome::class);
     }
+    public function environments()
+{
+    return $this->belongsToMany(
+        \Modules\SICA\Entities\Environment::class,
+        'environment_instructor_programs'
+    );
+}
+
 }

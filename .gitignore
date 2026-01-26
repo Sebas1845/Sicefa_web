@@ -16,3 +16,4 @@ composer.lock
 composer.json
 /public/modules/sigac/files/visit/visit_people_lists/
 /storage/app/visit_people_lists/
+/public/storage_backup/

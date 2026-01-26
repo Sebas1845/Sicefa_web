@@ -6,8 +6,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 
-
-
 Route::middleware(['lang'])->group(function () { //Middleware que permite la internacionalizacion
 
     Route::prefix('sigac')->group(function () {  // agrega el prefijo en la url (sicefa.test/sigac/...)
@@ -244,6 +242,23 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
             /* Route::get('instructor/reports/attendance', 'reports_attendance')->name('sigac.instructor.reports.attendance.index'); // Vista principal de la sección de reportes de asistencia (Instructor) */
             /* Route::get('wellness/reports/attendance', 'reports_attendance')->name('sigac.wellness.reports.attendance.index'); // Vista principal de la sección de reportes de asistencia (Bienestar) */
         });
+        
+        // RUTAS GESTION DE ASISTENCIAS (Duvan Trujillo 2025)
+
+        Route::controller(AttendanceRecordController::class)->group(function () {
+            // ---------------- Asistencia ---------------------------
+           Route::get('instructor/attendancesrecord/index', 'index')->name('sigac.instructor.attendancesrecord.index'); // Vista registro de asistencia (Instructor)
+           Route::post('instructor/attendances/attendance/edit', 'update')->name('sigac.instructor.attendancesrecord.update'); // Consultar asistencia (Instructor)
+           Route::post('instructor/attendances/attendance/store', 'store')->name('sigac.instructor.attendances.attendance.store'); // Registra asistencia del aprendiz (Instructor)
+           Route::get('academic_coordination/attendance/listAttendanceForCoordination', 'listAttendanceForCoordination')->name('sigac.academic_coordination.attendancesrecord.view_edit_page'); // Vista principal de la sección de reportes de asistencia (Coordinación Académica)
+           Route::post('academic_coordination/attendance/listAttendanceForCoordination/update', 'updateAjaxAcademicCoordination')->name('sigac.academic_coordination.attendancesrecord.edit'); // Consultar excusas de aprendiz (Instructor) */
+
+            /* Route::get('instructor/consult/attendance', 'consult_attendance')->name('sigac.instructor.attendance.consult'); // Consultar asistencia por aprendiz o tituladas (Instructor) */
+            /* Route::get('instructor/register', 'index')->name('sigac.instructor.attendance.register'); // Registrar asistencia de aprendiz por titulada (Instructor) */
+            /* Route::get('wellness/consult/attendance', 'consult_attendance')->name('sigac.wellness.attendance.consult'); // Consultar asistencia por aprendiz o tituladas (Bienestar) */
+            /* Route::get('instructor/reports/attendance', 'reports_attendance')->name('sigac.instructor.reports.attendance.index'); // Vista principal de la sección de reportes de asistencia (Instructor) */
+            /* Route::get('wellness/reports/attendance', 'reports_attendance')->name('sigac.wellness.reports.attendance.index'); // Vista principal de la sección de reportes de asistencia (Bienestar) */
+        });
 
         // RUTAS GESTION DE APRENDICES
         Route::controller(ApprenticeController::class)->group(function () {
@@ -351,7 +366,9 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
 
         });
 
-        //RUTAS PARA SOLICITUDES DE PERMISOS
+        //RUTAS PARA SOLICITUDES DE PERMISOS (Duvan Trujillo)
+
+        
    Route::controller(PermissionValidationController::class)->group(function () {
     // INSTRUCTOR
     Route::prefix('instructor/apprentice_permissions')->group(function () {

@@ -1,0 +1,262 @@
+
+  
+        .asistencia-item {
+            transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+            cursor: pointer;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            background-color: #ffffff;
+            /* Fondo predeterminado */
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Mantener el color de fondo cuando el mouse pasa sobre el item */
+        .asistencia-item:hover {
+            background: inherit;
+            /* No cambia el color, se mantiene el fondo actual */
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+            /* Agregar sombra para destacar */
+        }
+
+        /* Para los items seleccionados, añadir borde y estilo de selección */
+        .seleccionado {
+            outline: 2px solid rgba(13, 110, 253, 0.35);
+            outline-offset: 2px;
+            border-left: 6px solid #0d6efd;
+        }
+
+        /* Colores de los estados con gradientes más equilibrados */
+        .asistencia-asistio {
+            background: linear-gradient(135deg, #e2f5e6, #b0e0d3);
+            /* Verde suave */
+            border-left: 6px solid #198754;
+        }
+
+        .asistencia-tarde {
+            background: linear-gradient(135deg, #fff5b7, #ffe085);
+            /* Amarillo suave */
+            border-left: 6px solid #ffc107;
+        }
+
+        .asistencia-retiro {
+            background: linear-gradient(135deg, #d1e8f8, #a1c9f1);
+            /* Azul suave */
+            border-left: 6px solid #0dcaf0;
+        }
+
+        .asistencia-no {
+            background: linear-gradient(135deg, #f8d1d1, #f3b2b2);
+            /* Rojo suave */
+            border-left: 6px solid #dc3545;
+        }
+
+        .asistencia-excusa {
+            background: linear-gradient(135deg, #eef3f7, #d0d9e2);
+            /* Gris suave */
+            border-left: 6px solid #6c757d;
+        }
+
+        /* Estilo de los botones dentro del item */
+        .asistencia-item .btn-group .btn {
+            margin-bottom: 5px;
+            transition: background-color 0.2s ease;
+        }
+
+        /* Efecto hover en los botones */
+        .asistencia-item .btn-group .btn:hover {
+            opacity: 0.85;
+        }
+
+        /* Estilo de los checkboxes */
+        .asistencia-item input.form-check-input {
+            transform: scale(1.2);
+        }
+
+        /* Estilo de los textos pequeños */
+        .asistencia-item small {
+            color: #6c757d;
+        }
+
+        /* Ajustes al item de la lista */
+        .list-group-item.bg-light {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            margin-bottom: 10px;
+        }
+
+        .list-group-item.bg-light label {
+            cursor: pointer;
+            flex-grow: 1;
+            font-weight: 500;
+        }
+
+        /* Ajustes al checkbox global */
+        #seleccionar-todos {
+            margin-left: 0 !important;
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+
+        .asistencia-asistio:hover {
+            background: linear-gradient(135deg, #e2f5e6, #b0e0d3);
+            /* Verde suave */
+        }
+
+        .asistencia-tarde:hover {
+            background: linear-gradient(135deg, #fff5b7, #ffe085);
+            /* Amarillo suave */
+        }
+
+        .asistencia-retiro:hover {
+            background: linear-gradient(135deg, #d1e8f8, #a1c9f1);
+            /* Azul suave */
+        }
+
+        .asistencia-no:hover {
+            background: linear-gradient(135deg, #f8d1d1, #f3b2b2);
+            /* Rojo suave */
+        }
+
+        .asistencia-excusa:hover {
+            background: linear-gradient(135deg, #eef3f7, #d0d9e2);
+            /* Gris suave */
+        }
+
+        /* Estilo de los íconos dentro de los botones */
+        .btn i {
+            font-size: 18px;
+            /* Tamaño del ícono */
+            margin-right: 8px;
+            /* Espaciado entre el ícono y el texto */
+            vertical-align: middle;
+            /* Alineación vertical */
+        }
+
+        /* Opcional: Cambiar el color del ícono cuando pasa el mouse */
+        .btn:hover i {
+            opacity: 0.85;
+            /* Reducción de opacidad al pasar el mouse */
+        }
+
+        /* Estilo para el campo de búsqueda */
+        .input-group .form-control {
+            border-radius: 0.375rem;
+            box-shadow: none;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+        }
+
+        /* Icono dentro del input */
+        .input-group-text {
+            background-color: #f8f9fa;
+            border: 1px solid #ccc;
+            border-right: 0;
+            font-size: 1rem;
+        }
+
+        /* Estilo del botón para registrar asistencia */
+        .btn-primary {
+            background-color: #007bff;
+            border-color: #007bff;
+            font-size: 1rem;
+            padding: 12px 24px;
+            border-radius: 0.375rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            transition: background-color 0.2s ease, transform 0.2s ease;
+        }
+
+        /* Hover en el botón */
+        .btn-primary:hover {
+            background-color: #0056b3;
+            border-color: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        /* Estilo para el icono de búsqueda */
+        .fas.fa-search {
+            font-size: 1.1rem;
+            color: #888;
+        }
+
+        /* ================= HEADER SIGAC ================= */
+        .sigac-card-header {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            color: #ffffff;
+            padding: 14px 18px;
+            font-weight: 600;
+            border-radius: 0.375rem 0.375rem 0 0;
+            box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.15);
+        }
+
+        /* ================= BOTÓN PRINCIPAL SIGAC ================= */
+        .sigac-btn-primary {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            border: none;
+            color: #fff;
+            font-weight: 600;
+            padding: 12px 22px;
+            border-radius: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            box-shadow: 0 6px 15px rgba(37, 99, 235, 0.35);
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .sigac-btn-primary:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 22px rgba(30, 64, 175, 0.45);
+        }
+
+        .sigac-btn-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 10px rgba(30, 64, 175, 0.35);
+        }
+
+        /* ================= BOTÓN SIGAC VERDE ================= */
+        .sigac-btn-success {
+            background: linear-gradient(135deg, #16a34a, #166534);
+            border: none;
+            color: #fff;
+            font-weight: 600;
+            padding: 12px 22px;
+            border-radius: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            box-shadow: 0 6px 15px rgba(22, 163, 74, 0.35);
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .sigac-btn-success:hover {
+            background: linear-gradient(135deg, #15803d, #14532d);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 22px rgba(21, 128, 61, 0.45);
+        }
+
+        .sigac-btn-success:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 10px rgba(21, 128, 61, 0.35);
+        }
+
+        .asistencia-retirado {
+            background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+            border-left: 6px solid #6b7280;
+            opacity: 0.9;
+        }
+
+        .checkbox-retirado {
+            accent-color: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .retirado-bloqueado {
+            pointer-events: none;
+        }
