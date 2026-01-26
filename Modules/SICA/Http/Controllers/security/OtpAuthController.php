@@ -13,14 +13,12 @@ use Illuminate\Support\Str;
 
 use Modules\SICA\Entities\Person;
 use Modules\SICA\Entities\Apprentice;
-use Modules\SICA\Entities\Employee;
-use Modules\SICA\Entities\Contractor;
-
+use Modules\SICA\Entities\LoginOtp;
+use Modules\SICA\Entities\Role;
+use Modules\SICA\Entities\AccountActivation;
 use App\Models\User;
-use App\Models\LoginOtp;
-use App\Models\AccountActivation;
 
-use App\Mail\LoginOtpMail;
+use App\Mail\AUTH\LoginOtpMail;
 
 class OtpAuthController extends Controller
 {
@@ -29,18 +27,19 @@ class OtpAuthController extends Controller
     private int $otpTtlMinutes = 10;
     private int $maxAttempts = 5;
 
-    /**
-     * Formulario: ingresar documento
-     */
+    /** GET /otp-login */
     public function showDocumentForm()
     {
         return view('sica::auth.otp.document');
     }
 
     /**
-     * POST: recibe documento, valida persona/rol, genera OTP y envía al correo
+     * POST /otp-login
+     * Unifica "registro" + "solicitar código":
+     * - NO crea usuario todavía
+     * - Solo genera OTP y lo envía
      */
-    public function sendOtp(Request $request)
+    public function registerOrSendOtp(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'document_number' => ['required', 'string', 'max:30'],
@@ -52,27 +51,32 @@ class OtpAuthController extends Controller
             return back()->withErrors($validator)->withInput();
         }
 
-        $document = $this->normalizeDocument($request->input('document_number'));
+        $document = $this->normalizeDocument((string) $request->input('document_number'));
+        if ($document === '' || strlen($document) < 6) {
+            return back()->withInput()->with('error', 'Documento inválido.');
+        }
 
         $person = Person::where('document_number', $document)->first();
         if (!$person) {
-            return back()->withInput()->with('error', 'No autorizado o no encontrado.');
+            return back()->withInput()->with('error', 'Persona no encontrada.');
         }
 
-        if (!$this->isEligible($person->id)) {
-            return back()->withInput()->with('error', 'No autorizado para iniciar sesión.');
+        // SOLO aprendices
+        if (!$this->isEligible((int)$person->id)) {
+            return back()->withInput()->with('error', 'Este acceso es exclusivo para aprendices.');
         }
 
+        // SOLO personal_email
         $email = $this->pickEmail($person);
         if (!$email) {
-            return back()->withInput()->with('error', 'No tienes un correo registrado para validación. Contacta al administrador.');
+            return back()->withInput()->with('error', 'No tienes correo personal registrado (personal_email). Contacta al administrador.');
         }
 
         // Generar OTP
         $otp = $this->generateOtp($this->otpLength);
         $otpHash = hash('sha256', $otp);
 
-        // Invalidate OTPs previos activos (opcional pero recomendado para evitar confusión)
+        // Invalidar OTPs anteriores activos
         LoginOtp::where('person_id', $person->id)
             ->whereNull('consumed_at')
             ->where('expires_at', '>', now())
@@ -94,56 +98,51 @@ class OtpAuthController extends Controller
         try {
             Mail::to($email)->send(new LoginOtpMail($otp, $this->otpTtlMinutes));
         } catch (\Throwable $e) {
+            logger()->error('OTP Mail send failed', [
+                'person_id' => $person->id,
+                'email' => $email,
+                'error' => $e->getMessage(),
+            ]);
+
             return back()->withInput()->with('error', 'No fue posible enviar el código al correo. Intenta más tarde.');
         }
 
-        // Redirigir al formulario de verificación OTP (manteniendo documento)
-        return redirect()->route('otp.login.verify.form', ['document_number' => $document])
-            ->with('success', 'Te enviamos un código de seguridad a tu correo.');
+        return redirect()
+            ->route('otp.login.verify.form', ['document_number' => $document])
+            ->with('success', 'Te enviamos un código de seguridad a tu correo personal.');
     }
 
-    /**
-     * Formulario: ingresar OTP
-     */
+    /** GET /otp-login/verify */
     public function showOtpForm(Request $request)
     {
         $document = $this->normalizeDocument((string) $request->query('document_number', ''));
-
-        return view('sica::auth.otp.verify', [
-            'document_number' => $document,
-        ]);
+        return view('auth.verify', ['document_number' => $document]);
     }
 
-    /**
-     * POST: valida OTP y autentica
-     */
+    /** POST /otp-login/verify */
     public function verifyOtp(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'document_number' => ['required', 'string', 'max:30'],
             'code'            => ['required', 'string', 'min:4', 'max:10'],
-        ], [
-            'document_number.required' => 'El documento es requerido.',
-            'code.required'            => 'El código es requerido.',
         ]);
 
         if ($validator->fails()) {
             return back()->withErrors($validator)->withInput();
         }
 
-        $document = $this->normalizeDocument($request->input('document_number'));
-        $code = trim((string) $request->input('code'));
+        $document = $this->normalizeDocument((string) $request->input('document_number'));
+        $code = preg_replace('/\s+/', '', (string) $request->input('code'));
 
         $person = Person::where('document_number', $document)->first();
         if (!$person) {
             return back()->withInput()->with('error', 'Código inválido o expirado.');
         }
 
-        if (!$this->isEligible($person->id)) {
+        if (!$this->isEligible((int) $person->id)) {
             return back()->withInput()->with('error', 'No autorizado para iniciar sesión.');
         }
 
-        // Tomar el último OTP válido
         $otpRow = LoginOtp::where('person_id', $person->id)
             ->whereNull('consumed_at')
             ->where('expires_at', '>', now())
@@ -154,17 +153,14 @@ class OtpAuthController extends Controller
             return back()->withInput()->with('error', 'Código inválido o expirado. Solicita un nuevo código.');
         }
 
-        // Verificar OTP
         $isValid = hash('sha256', $code) === $otpRow->otp_hash;
 
         if (!$isValid) {
             $otpRow->increment('attempts');
 
             if ($otpRow->attempts >= $this->maxAttempts) {
-                // Invalida OTP (marcar consumido)
                 $otpRow->consumed_at = now();
                 $otpRow->save();
-
                 return back()->withInput()->with('error', 'Demasiados intentos. Solicita un nuevo código.');
             }
 
@@ -175,118 +171,183 @@ class OtpAuthController extends Controller
         $otpRow->consumed_at = now();
         $otpRow->save();
 
-        // Determinar correo (puede usar el email_used que se envió)
-        $emailUsed = $otpRow->email_used;
+        $emailUsed = strtolower(trim((string) $otpRow->email_used));
+        if ($emailUsed === '' || !str_contains($emailUsed, '@')) {
+            return back()->withInput()->with('error', 'No se encontró un correo válido para iniciar sesión. Solicita un nuevo código.');
+        }
 
-        // Autenticación: obtener o crear User por person_id
-        DB::beginTransaction();
+        // Bloqueo por email ya usado por otra persona (users.email unique)
+        $otherUser = User::where('email', $emailUsed)
+            ->where('person_id', '!=', $person->id)
+            ->exists();
+
+        if ($otherUser) {
+            return back()->withInput()->with('error', 'Este correo ya está registrado con otra persona. Contacta al administrador.');
+        }
+
         try {
-            $user = User::where('person_id', $person->id)->first();
+            $user = DB::transaction(function () use ($person, $emailUsed) {
 
-            $createdNow = false;
+                // Crear usuario si no existe
+                $user = User::where('person_id', $person->id)->first();
 
-            if (!$user) {
-                $createdNow = true;
-                $user = new User();
-                $user->person_id = $person->id;
-                $user->nickname = $this->generateNickname($person);
-                $user->email = $emailUsed;
-
-                // Password fuerte aleatoria (no se envía por correo)
-                $user->password = Hash::make(Str::random(24));
-                $user->save();
-
-                // Nota: NO asigno roles aquí para no afectar tu sistema actual.
-                // Si lo deseas, se puede asignar rol según si es apprentice/employee/contractor.
-            } else {
-                // Mantener email coherente con el usado para OTP (opcional)
-                if (!empty($emailUsed) && $user->email !== $emailUsed) {
-                    // Si ya hay un user con otro correo, NO lo cambio automáticamente si no quieres afectar el sistema.
-                    // Si quieres sincronizar, cambia esta regla.
+                if (!$user) {
+                    $user = new User();
+                    $user->person_id = $person->id;
+                    $user->nickname  = $this->generateNickname($person);
+                    $user->email     = $emailUsed;
+                    $user->password  = Hash::make(Str::random(32));
+                    $user->save();
+                } else {
+                    if (empty($user->email)) {
+                        $user->email = $emailUsed;
+                        $user->save();
+                    }
                 }
-            }
 
-            // Activación / forzar cambio de contraseña
-            $activation = AccountActivation::firstOrCreate(
-                ['person_id' => $person->id],
-                [
-                    'activated_at' => null,
-                    'last_login_at' => null,
-                    'must_change_password' => true,
-                ]
-            );
+                // Rol aprendiz por slug exacto
+                $roleId = Role::where('slug', 'sigac.apprentice')->value('id');
 
-            if (is_null($activation->activated_at)) {
-                $activation->activated_at = now();
+                if ($roleId) {
+                    $user->roles()->syncWithoutDetaching([$roleId]);
+                } else {
+                    logger()->warning('Rol sigac.apprentice no encontrado', [
+                        'person_id' => $person->id,
+                        'user_id'   => $user->id,
+                    ]);
+                }
+
+                // Activación + FORZAR cambio de contraseña
+                $activation = AccountActivation::firstOrCreate(
+                    ['person_id' => $person->id],
+                    [
+                        'activated_at'         => null,
+                        'last_login_at'        => null,
+                        'must_change_password' => true,
+                    ]
+                );
+
+                if (is_null($activation->activated_at)) {
+                    $activation->activated_at = now();
+                }
+
+                $activation->last_login_at = now();
                 $activation->must_change_password = true;
-            }
+                $activation->save();
 
-            $activation->last_login_at = now();
-
-            // Si el user fue creado en este momento, forzamos sí o sí
-            if ($createdNow) {
-                $activation->must_change_password = true;
-            }
-
-            $activation->save();
-
-            // Login
-            Auth::login($user);
-
-            DB::commit();
-
+                return $user;
+            });
         } catch (\Throwable $e) {
-            DB::rollBack();
+            logger()->error('OTP verify login failed', [
+                'person_id'  => $person->id ?? null,
+                'email_used' => $emailUsed ?? null,
+                'error'      => $e->getMessage(),
+            ]);
+
             return back()->withInput()->with('error', 'No fue posible iniciar sesión. Intenta nuevamente.');
         }
 
-        // Redirección: si debe cambiar contraseña
-        $activation = AccountActivation::where('person_id', $person->id)->first();
-        if ($activation && $activation->must_change_password) {
-            return redirect()->route('otp.password.change.form');
+        // Evita redirecciones heredadas al módulo SICA
+        $request->session()->forget('url.intended');
+
+        Auth::login($user);
+
+        // CAMBIO: redirigir al formulario OTP password (names nuevos)
+        return redirect()->route('otp.login.password.form');
+    }
+
+    /** GET /otp-login/password */
+    public function showPasswordChangeForm(Request $request)
+    {
+        if (!Auth::check()) {
+            return redirect()->route('login');
         }
 
-        return redirect()->intended(route('cefa.home'));
+        $personId = (int) (Auth::user()->person_id ?? 0);
+        if ($personId <= 0) {
+            Auth::logout();
+            return redirect()->route('login')->with('error', 'Sesión inválida.');
+        }
+
+        $activation = AccountActivation::where('person_id', $personId)->first();
+
+        // Si por alguna razón ya no debe cambiar contraseña, manda a CEFA (NO a SICA)
+        if ($activation && !$activation->must_change_password) {
+            return redirect()->route('cefa.welcome'); // o cefa.index
+        }
+
+        return view('auth.passwords.otpchange_password', [
+            'person' => Auth::user()->person,
+            'title' => 'Cambiar contraseña'
+        ]);
     }
 
-    /**
-     * Valida si la persona puede usar OTP login:
-     * - aprendiz (apprentices)
-     * - instructor contratista (contractors)
-     * - instructor planta (employees)
-     */
+    /** POST /otp-login/password */
+    public function savePasswordChange(Request $request)
+    {
+        if (!Auth::check()) {
+            return redirect()->route('login');
+        }
+
+        $validator = Validator::make($request->all(), [
+            'new_password' => ['required', 'string', 'min:8', 'confirmed'],
+        ], [
+            'new_password.required'  => 'La nueva contraseña es requerida.',
+            'new_password.min'       => 'La contraseña debe tener mínimo 8 caracteres.',
+            'new_password.confirmed' => 'La confirmación no coincide.',
+        ]);
+
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput();
+        }
+
+        $authUser = Auth::user();
+
+        try {
+            DB::transaction(function () use ($authUser, $request) {
+                $userModel = User::findOrFail($authUser->id);
+                $userModel->password = Hash::make((string) $request->input('new_password'));
+                $userModel->save();
+
+                $activation = AccountActivation::where('person_id', $userModel->person_id)->first();
+                if ($activation) {
+                    $activation->must_change_password = false;
+                    $activation->save();
+                }
+            });
+        } catch (\Throwable $e) {
+            logger()->error('OTP password change failed', [
+                'user_id' => $authUser->id ?? null,
+                'error'   => $e->getMessage(),
+            ]);
+
+            return back()->with('error', 'No fue posible cambiar la contraseña. Intenta nuevamente.');
+        }
+
+        // Evita que se “pegue” un intended a /sica/index
+        $request->session()->forget('url.intended');
+
+        // CAMBIO: salida a CEFA
+        return redirect()->route('cefa.welcome') // o cefa.index
+            ->with('success', 'Contraseña actualizada correctamente.');
+    }
+
+    /* ========================= Helpers ========================= */
+
     private function isEligible(int $personId): bool
     {
-        $isApprentice = Apprentice::where('person_id', $personId)->exists();
-        $isContractor = Contractor::where('person_id', $personId)->exists();
-        $isEmployee   = Employee::where('person_id', $personId)->exists();
-
-        return $isApprentice || $isContractor || $isEmployee;
+        return Apprentice::where('person_id', $personId)->exists();
     }
 
-    /**
-     * Selecciona correo con prioridad: misena > sena > personal
-     */
     private function pickEmail(Person $person): ?string
     {
-        $candidates = [
-            $person->misena_email ?? null,
-            $person->sena_email ?? null,
-            $person->personal_email ?? null,
-        ];
-
-        foreach ($candidates as $email) {
-            $email = strtolower(trim((string) $email));
-            if ($email !== '' && str_contains($email, '@')) {
-                return $email;
-            }
+        $email = strtolower(trim((string) ($person->personal_email ?? '')));
+        if ($email !== '' && str_contains($email, '@')) {
+            return $email;
         }
         return null;
     }
 
-    /**
-     * Genera OTP numérico
-     */
     private function generateOtp(int $length = 6): string
     {
         $min = (int) pow(10, $length - 1);
@@ -294,30 +355,19 @@ class OtpAuthController extends Controller
         return (string) random_int($min, $max);
     }
 
-    /**
-     * Normaliza documento: solo dígitos (si manejas CE con letras, ajusta)
-     */
     private function normalizeDocument(string $document): string
     {
-        $document = trim($document);
-        // Si tus documentos pueden tener letras (CE), elimina esta línea y solo haz trim.
-        return preg_replace('/\D+/', '', $document);
+        return preg_replace('/\D+/', '', trim($document));
     }
 
-    /**
-     * Nickname base (si el user no existe)
-     */
     private function generateNickname(Person $person): string
     {
         $base = Str::ascii(($person->first_name ?? '') . ($person->first_last_name ?? ''));
         $base = strtoupper(preg_replace('/\s+/', '', $base));
         $base = substr($base, 0, 6);
 
-        if ($base === '') {
-            $base = 'USER';
-        }
+        if ($base === '') $base = 'USER';
 
-        // Evitar colisión simple
         $suffix = substr((string) ($person->document_number ?? ''), -2);
         return $base . $suffix;
     }

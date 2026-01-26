@@ -13,13 +13,12 @@ use App\Models\User;
 use App\Rules\AtLeastOneRoleSelected;
 use Modules\SICA\Entities\App;
 use Modules\SICA\Entities\Role;
-use Modules\SICA\Entities\Employee;
-use Modules\SICA\Entities\EmployeeType;
-use Modules\SICA\Entities\Contractor;
 use Modules\SICA\Entities\Apprentice;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
+use App\Mail\AUTH\LoginOtpMail;
+use Modules\SICA\Entities\LoginOtp;
 
 
 class UserController extends Controller
@@ -215,69 +214,93 @@ class UserController extends Controller
      */
     public function user_search_person(Request $request)
     {
-        // Acepta GET o POST
-        $document_number = $request->input('document_number');
-        $document_number = preg_replace('/\D+/', '', (string) $document_number);
+        try {
+            $document_number = preg_replace('/\D+/', '', (string) $request->input('document_number'));
 
-        if (!$document_number || strlen($document_number) < 6) {
-            return response()->json(['error' => 'Documento inválido.'], 422);
+            if (!$document_number || strlen($document_number) < 6) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'Documento inválido.',
+                    'hint' => 'Debe tener al menos 6 dígitos.'
+                ], 422);
+            }
+
+            $person = Person::where('document_number', $document_number)->first();
+            if (!$person) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'Persona no encontrada.',
+                    'hint' => 'Verifica el documento.'
+                ], 404);
+            }
+
+            if (User::where('person_id', $person->id)->exists()) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'Esta persona ya cuenta con un usuario.',
+                    'hint' => 'Intenta iniciar sesión.'
+                ], 409);
+            }
+
+            // SOLO APRENDIZ
+            $isApprentice = Apprentice::where('person_id', $person->id)->exists();
+            if (!$isApprentice) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'Este registro es solo para aprendices.',
+                    'hint' => 'Si eres instructor, solicita creación por administración.'
+                ], 403);
+            }
+
+            // SOLO personal_email
+            $personalEmail = strtolower(trim((string) ($person->personal_email ?? '')));
+            if ($personalEmail === '' || !str_contains($personalEmail, '@')) {
+                return response()->json([
+                    'ok' => false,
+                    'message' => 'No tienes correo personal registrado.',
+                    'hint' => 'Contacta a Coordinación Académica para actualizarlo.'
+                ], 422);
+            }
+
+            return response()->json([
+                'ok' => true,
+                'rol' => 'Aprendiz',
+                'person' => [
+                    'id' => $person->id,
+                    'document_number' => $person->document_number,
+                    'first_name' => $person->first_name,
+                    'first_last_name' => $person->first_last_name,
+                    'second_last_name' => $person->second_last_name,
+                ],
+                // compatibilidad con tu vista vieja:
+                'emails' => [
+                    ['value' => $personalEmail, 'type' => 'personal_email'],
+                ],
+                // y también lo dejas directo por si luego migras:
+                'personal_email' => $personalEmail,
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Error interno consultando el documento.',
+                'hint' => 'Revisa storage/logs/laravel.log',
+                'debug' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
         }
-
-        $person = Person::where('document_number', $document_number)->first();
-        if (!$person) {
-            return response()->json(['error' => 'Persona no encontrada'], 404);
-        }
-
-        if (User::where('person_id', $person->id)->exists()) {
-            return response()->json(['error' => 'Esta persona ya cuenta con un usuario'], 409);
-        }
-
-        // Rol: Instructor si está en employees o contractors; Aprendiz si está en apprentices
-        $isEmployee   = Employee::where('person_id', $person->id)->exists();
-        $isContractor = Contractor::where('person_id', $person->id)->exists();
-        $isApprentice = Apprentice::where('person_id', $person->id)->exists();
-
-        $rol = $isEmployee || $isContractor ? 'Instructor' : ($isApprentice ? 'Aprendiz' : 'Ninguno');
-
-        // Emails disponibles
-        $emails = collect([
-            ['type' => 'misena_email',   'value' => $person->misena_email],
-            ['type' => 'sena_email',     'value' => $person->sena_email],
-            ['type' => 'personal_email', 'value' => $person->personal_email],
-        ])->map(function ($e) {
-            $v = strtolower(trim((string) $e['value']));
-            return ['type' => $e['type'], 'value' => $v];
-        })->filter(function ($e) {
-            return $e['value'] !== '' && str_contains($e['value'], '@');
-        })->values();
-
-        return response()->json([
-            'person' => [
-                'id' => $person->id,
-                'document_number' => $person->document_number,
-                'first_name' => $person->first_name,
-                'first_last_name' => $person->first_last_name,
-                'second_last_name' => $person->second_last_name,
-            ],
-            'rol' => $rol,
-            'emails' => $emails,
-        ], 200);
     }
+
+
 
     /**
      * POST: Crea usuario con email seleccionado (o email manual si no había)
      * RUTA RECOMENDADA: cefa.user.register.store
      */
     public function user_register_store(Request $request)
-    {
+    {   
         $validator = Validator::make($request->all(), [
             'document_number' => ['required', 'string', 'max:30'],
-            'role'            => ['required', 'in:Instructor,Aprendiz'],
-            'email_selected'  => ['nullable', 'email', 'max:255'],
-            'email'           => ['nullable', 'email', 'max:255'],
         ], [
             'document_number.required' => 'El documento es requerido.',
-            'role.required'            => 'Rol requerido.',
         ]);
 
         if ($validator->fails()) {
@@ -285,96 +308,133 @@ class UserController extends Controller
         }
 
         $document_number = preg_replace('/\D+/', '', (string) $request->input('document_number'));
-        $role = (string) $request->input('role');
+        if (!$document_number || strlen($document_number) < 6) {
+            return back()->withInput()->with('error', 'Documento inválido.');
+        }
 
         $person = Person::where('document_number', $document_number)->first();
         if (!$person) {
             return back()->withInput()->with('error', 'Persona no encontrada.');
         }
 
-        if (User::where('person_id', $person->id)->exists()) {
-            return back()->withInput()->with('error', 'Esta persona ya cuenta con un usuario.');
-        }
-
-        // Validación de elegibilidad (evita que alguien fuerce role por HTML)
-        $isEmployee   = Employee::where('person_id', $person->id)->exists();
-        $isContractor = Contractor::where('person_id', $person->id)->exists();
+        // SOLO aprendices
         $isApprentice = Apprentice::where('person_id', $person->id)->exists();
-
-        $realRole = $isEmployee || $isContractor ? 'Instructor' : ($isApprentice ? 'Aprendiz' : 'Ninguno');
-        if ($realRole === 'Ninguno') {
-            return back()->withInput()->with('error', 'No autorizado para crear usuario.');
-        }
-        if ($realRole !== $role) {
-            return back()->withInput()->with('error', 'Rol inválido para esta persona.');
+        if (!$isApprentice) {
+            return back()->withInput()->with('error', 'Este registro es exclusivo para aprendices.');
         }
 
-        // Email final: primero el seleccionado, si no, el manual
-        $email = trim((string) $request->input('email_selected'));
-        if ($email === '') {
-            $email = trim((string) $request->input('email'));
-        }
-        if ($email === '') {
-            return back()->withInput()->with('error', 'No hay correo disponible. Ingresa un correo.');
-        }
-
-        // Evitar duplicado en users
-        if (User::where('email', $email)->exists()) {
-            return back()->withInput()->with('error', 'Ya existe un usuario con ese correo.');
+        // SOLO personal_email
+        $email = strtolower(trim((string) ($person->personal_email ?? '')));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return back()->withInput()->with(
+                'error',
+                'No tienes correo personal registrado. Contacta a Coordinación.'
+            );
         }
 
-        // Password temporal (si lo sigues usando) — Recomendación: luego migrarlo a OTP
-        $first_name = Str::ascii((string) $person->first_name);
-        $first_last_name = Str::ascii((string) $person->first_last_name);
-        $passwordPlain = ucfirst(strtolower(
-            substr($first_name, 0, 2) .
-                substr($first_last_name, 0, 2) .
-                substr((string) $person->document_number, -4)
-        ));
+        // Ya existe usuario
+        if (User::where('person_id', $person->id)->exists()) {
+            return back()->withInput()->with('error', 'Esta persona ya cuenta con un usuario. Intenta iniciar sesión.');
+        }
+
+        // OTP config
+        $ttlMinutes = 10;
+        $otp = (string) random_int(100000, 999999);
+        $otpHash = hash('sha256', $otp);
 
         DB::beginTransaction();
-        try {
-            $user = new User();
-            $user->nickname = strtoupper(substr(Str::ascii($person->first_name . $person->first_last_name), 0, 6));
-            $user->person_id = $person->id;
-            $user->email = $email;
-            $user->password = Hash::make($passwordPlain);
-            $user->save();
 
-            // Roles (ajusta tus criterios si los slugs son diferentes)
-            if ($role === 'Instructor') {
-                $roles = Role::where('name', 'LIKE', '%instructor%')->pluck('id')->toArray();
-                $user->roles()->sync($roles);
-            } else { // Aprendiz
-                $roles = Role::where('slug', 'LIKE', '%.apprentice%')->pluck('id')->toArray();
-                $user->roles()->sync($roles);
+        try {
+            // 1) Crear User
+            $baseNick = Str::ascii(trim(($person->first_name ?? '') . ' ' . ($person->first_last_name ?? '')));
+            $baseNick = preg_replace('/\s+/', '', $baseNick);
+            $baseNick = strtoupper(substr($baseNick, 0, 10));
+            if ($baseNick === '') $baseNick = 'APPR';
+
+            // Evitar colisión de nickname
+            $nickname = $baseNick;
+            $i = 1;
+            while (User::where('nickname', $nickname)->exists()) {
+                $nickname = $baseNick . $i;
+                $i++;
+                if ($i > 999) break;
             }
 
-            // Enviar correo (tu vista actual)
-            $asunto = "Solicitud de Usuario";
-            Mail::send('auth.passwords.content_email', [
-                'asunto' => $asunto,
-                'email' => $email,
-                'password' => $passwordPlain
-            ], function ($msg) use ($asunto, $email) {
-                $msg->subject($asunto);
-                $msg->to($email);
-            });
+            $user = new User();
+            $user->person_id = $person->id;
+            $user->nickname  = $nickname;
+            $user->email     = $email;
+            $user->password  = Hash::make(Str::random(32));
+            $user->save();
+
+            // 2) Asignar rol aprendiz
+            $roleIds = Role::where('slug', 'LIKE', '%.apprentice%')->pluck('id')->toArray();
+
+            // Fallback si tu slug no coincide
+            if (empty($roleIds)) {
+                $roleIds = Role::where('name', 'LIKE', '%Aprendiz%')->pluck('id')->toArray();
+            }
+
+            if (!empty($roleIds)) {
+                $user->roles()->sync($roleIds);
+            }
+
+            // 3) Invalidar OTP previos
+            LoginOtp::where('person_id', $person->id)
+                ->whereNull('consumed_at')
+                ->where('expires_at', '>', now())
+                ->update(['consumed_at' => now()]);
+
+            // 4) Crear OTP
+            LoginOtp::create([
+                'person_id'   => $person->id,
+                'email_used'  => $email,
+                'otp_hash'    => $otpHash,
+                'attempts'    => 0,
+                'expires_at'  => now()->addMinutes($ttlMinutes),
+                'consumed_at' => null,
+                'created_ip'  => $request->ip(),
+                'user_agent'  => substr((string) $request->userAgent(), 0, 255),
+            ]);
+
+            // 5) Enviar correo OTP (si falla, debe hacer rollback)
+            try {
+                Mail::to($email)->send(new LoginOtpMail($otp, $ttlMinutes));
+            } catch (\Throwable $mailEx) {
+                // Log específico de correo
+                logger()->error('OTP Mail send failed', [
+                    'person_id' => $person->id,
+                    'email' => $email,
+                    'error' => $mailEx->getMessage(),
+                ]);
+
+                throw $mailEx; // fuerza rollback
+            }
 
             DB::commit();
         } catch (\Throwable $e) {
             DB::rollBack();
-            return back()->withInput()->with('error', 'No fue posible crear el usuario. Error: ' . $e->getMessage());
+
+            logger()->error('User register store failed', [
+                'document_number' => $document_number,
+                'person_id' => $person->id ?? null,
+                'email' => $email ?? null,
+                'error' => $e->getMessage(),
+                'trace' => substr($e->getTraceAsString(), 0, 2000),
+            ]);
+
+            // En dev puedes mostrar el error real (opcional)
+            if (config('app.debug')) {
+                return back()->withInput()->with('error', 'FALLÓ: ' . $e->getMessage());
+            }
+
+            return back()->withInput()->with('error', 'No fue posible completar la solicitud. Intenta más tarde.');
         }
 
-        return redirect(route('cefa.home'))->with([
-            'message' => 'Usuario creado y correo enviado correctamente.',
-            'typealert' => 'success'
-        ]);
+        return redirect()
+            ->route('otp.login.verify.form', ['document_number' => $document_number])
+            ->with('success', 'Te enviamos un código de seguridad a tu correo personal.');
     }
-
-
-
 
 
     /* Registrar usuario google */

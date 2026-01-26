@@ -1,8 +1,8 @@
 <?php
 
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 
 class CreateMunicipalityRatesTable extends Migration
 {
@@ -11,17 +11,28 @@ class CreateMunicipalityRatesTable extends Migration
         Schema::create('municipality_rates', function (Blueprint $table) {
             $table->id();
 
-            // If you have a municipalities table, use municipality_id instead.
-            $table->string('municipality_name', 120);
+            /**
+             * Recomendado:
+             * - municipality_id: para relacionar con tu tabla municipalities (cuando quieras)
+             * - municipality_name: para carga rápida y fallback si no tienes ID aún
+             */
+            $table->unsignedBigInteger('municipality_id')->nullable()->index();
+            $table->string('municipality_name', 120)->index();
 
-            $table->decimal('transport_amount', 12, 2)->default(0);
-            $table->boolean('active')->default(true);
+            // Costos SOLO IDA
+            $table->decimal('bus_amount', 12, 2)->default(0);
+            $table->decimal('van_amount', 12, 2)->default(0);        // Camioneta
+            $table->decimal('motorcycle_amount', 12, 2)->default(0);
+            $table->decimal('air_amount', 12, 2)->default(0);
+
+            $table->boolean('active')->default(true)->index();
             $table->timestamps();
 
-            $table->index(['municipality_name']);
-            $table->index(['active']);
+            // Unicidad cuando tengas municipality_id poblado (opcional)
+            // $table->unique(['municipality_id'], 'uniq_municipality_rates_municipality_id');
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('municipality_rates');

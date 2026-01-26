@@ -1,3 +1,4 @@
+<!-- vista::program_request.confirmation -->
 <div class="modal fade" id="characterization{{$prom->id}}" tabindex="-1" aria-labelledby="dates" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">

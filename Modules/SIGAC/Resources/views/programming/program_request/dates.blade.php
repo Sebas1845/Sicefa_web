@@ -1,33 +1,61 @@
-<div class="modal fade" id="dates{{$prom->id}}" tabindex="-1" aria-labelledby="dates" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+@php
+    $dates = $pr->dates ?? collect();
+
+    $fmtDate = function ($val) {
+        try { return $val ? \Carbon\Carbon::parse($val)->format('d/m/Y') : ''; }
+        catch (\Throwable $e) { return (string) $val; }
+    };
+
+    $fmtTime = function ($val) {
+        try { return $val ? \Carbon\Carbon::parse($val)->format('H:i') : ''; }
+        catch (\Throwable $e) { return (string) $val; }
+    };
+@endphp
+
+<div class="modal fade" id="datesModal{{ $pr->id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header">
-                <h4 class="modal-title" id="ModalLabel">{{ trans('Programación')}}</h4>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+
+            <div class="modal-header py-2">
+                <h6 class="modal-title mb-0">Programación · Solicitud #{{ $pr->id }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
+
             <div class="modal-body">
-                @foreach($prom->groupedDates as $timeRange => $datesGroup)
-                    <h4><b>Programación : {{ $loop->iteration }}</b></h4>
-                    <ul>
-                        <li>
-                            <h5><b>Fechas :</b></h5>
-                            <p>
-                                @foreach($datesGroup as $date)
-                                    {{ \Carbon\Carbon::parse($date->date)->format('d-m-y') }}<br>
+                @if($dates->isEmpty())
+                    <div class="alert alert-warning mb-0">
+                        No hay fechas registradas para esta solicitud.
+                    </div>
+                @else
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:34%">Fecha</th>
+                                    <th style="width:33%">Hora inicio</th>
+                                    <th style="width:33%">Hora fin</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($dates as $d)
+                                    <tr>
+                                        <td>{{ $fmtDate($d->date ?? null) }}</td>
+                                        <td>{{ $fmtTime($d->start_time ?? null) }}</td>
+                                        <td>{{ $fmtTime($d->end_time ?? null) }}</td>
+                                    </tr>
                                 @endforeach
-                            </p>
-                        </li>
-                        <li>
-                            <h5><b>Hora de inicio :</b></h5>
-                            <p>{{ $datesGroup->first()->start_time }}</p>
-                        </li>
-                        <li>
-                            <h5><b>Hora fin :</b></h5>
-                            <p>{{ $datesGroup->first()->end_time }}</p>
-                        </li>
-                    </ul>
-                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
             </div>
+
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+                    Cerrar
+                </button>
+            </div>
+
         </div>
-    </div>  
+    </div>
 </div>

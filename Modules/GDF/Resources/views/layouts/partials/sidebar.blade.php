@@ -1,17 +1,24 @@
 @php
-    $area = session('gdf.area'); // academic|campesena|null
-    $mode = session('gdf.mode'); // coord|support|null
+    $ctx  = session('gdf_context', ['role' => null, 'area' => null]);
+    $role = $ctx['role'] ?? null;
+    $area = $ctx['area'] ?? null;
 
-    $isSubdirection = function_exists('checkRol') ? checkRol('gdf.subdirection') : false;
-    $isTreasury     = function_exists('checkRol') ? checkRol('gdf.treasury') : false;
+    $roleLabel = match($role) {
+        'subdirection' => 'Subdirección',
+        'treasury'     => 'Tesorería',
+        'coord'        => 'Coordinación',
+        'support'      => 'Apoyo',
+        'official'     => 'Instructor',
+        default        => 'SIN ROL',
+    };
 
-    $isAcademicCoord = function_exists('checkRol') ? checkRol('gdf.academic_coordination') : false;
-    $isCampesenaCoord = function_exists('checkRol') ? checkRol('gdf.campesena_coordination') : false;
+    $areaLabel = match($area) {
+        'academic'  => 'Académica',
+        'campesena' => 'Campesena',
+        default     => null,
+    };
 
-    $isSupportAcademic = function_exists('checkRol') ? checkRol('gdf.support_academic') : false;
-    $isSupportCampesena = function_exists('checkRol') ? checkRol('gdf.support_campesena') : false;
-
-    $isAnyAdmin = $isSubdirection || $isTreasury;
+    $headerLabel = $areaLabel ? "{$roleLabel} · {$areaLabel}" : $roleLabel;
 @endphp
 
 <aside class="gdf-sidebar" id="gdfSidebar">
@@ -21,9 +28,7 @@
                 <span class="gdf-brand-mark"></span>
                 <div>
                     <div class="fw-semibold">Panel GDF</div>
-                    <div class="text-white-50 small">
-                        {{ $area ? strtoupper($area) : 'SIN ÁREA' }} · {{ $mode ? strtoupper($mode) : 'MODO' }}
-                    </div>
+                    <div class="text-white-50 small">{{ $headerLabel }}</div>
                 </div>
             </div>
 
@@ -35,36 +40,42 @@
 
     <div class="gdf-sidebar-body">
 
-        {{-- Acceso rápido --}}
         <a class="gdf-side-link {{ request()->routeIs('gdf.gateway') ? 'active' : '' }}"
            href="{{ route('gdf.gateway') }}">
             <i class="bi bi-grid-1x2"></i>
-            <span>Elegir rol</span>
+            <span>Cambiar rol</span>
         </a>
 
-        @if($isAnyAdmin)
+        {{-- ADMIN --}}
+        @if(in_array($role, ['subdirection','treasury'], true))
             <div class="gdf-side-section">Administración</div>
 
-            <a class="gdf-side-link {{ request()->routeIs('gdf.view.admin') ? 'active' : '' }}"
-               href="{{ route('gdf.view.admin') }}">
-                <i class="bi bi-shield-check"></i>
-                <span>Dashboard Admin</span>
+            <a class="gdf-side-link {{ request()->routeIs('gdf.admin.dashboard') ? 'active' : '' }}"
+               href="{{ route('gdf.admin.dashboard') }}">
+                <i class="bi bi-speedometer2"></i>
+                <span>Dashboard</span>
             </a>
 
-            {{-- Filament opcional --}}
+            <a class="gdf-side-link {{ request()->routeIs('gdf.admin.users.*') ? 'active' : '' }}"
+               href="{{ route('gdf.admin.users.index') }}">
+                <i class="bi bi-people"></i>
+                <span>Usuarios y roles</span>
+            </a>
+
             <a class="gdf-side-link" href="{{ url('/gdf/panel') }}">
                 <i class="bi bi-window"></i>
                 <span>Panel Filament</span>
             </a>
         @endif
 
-        <div class="gdf-side-section">Operación</div>
+        {{-- ACADÉMICA --}}
+        @if(in_array($role, ['coord','support'], true) && $area === 'academic')
+            <div class="gdf-side-section">Operación</div>
 
-        @if($area === 'academic' && ($isAcademicCoord || $isSupportAcademic))
-            <a class="gdf-side-link {{ request()->routeIs('gdf.view.coordination') ? 'active' : '' }}"
-               href="{{ route('gdf.view.coordination') }}">
+            <a class="gdf-side-link {{ request()->routeIs('gdf.academic.dashboard') ? 'active' : '' }}"
+               href="{{ route('gdf.academic.dashboard') }}">
                 <i class="bi bi-mortarboard"></i>
-                <span>Coordinación Académica</span>
+                <span>Dashboard Académica</span>
             </a>
 
             <a class="gdf-side-link" href="#">
@@ -78,11 +89,14 @@
             </a>
         @endif
 
-        @if($area === 'campesena' && ($isCampesenaCoord || $isSupportCampesena))
-            <a class="gdf-side-link {{ request()->routeIs('gdf.view.campesena') ? 'active' : '' }}"
-               href="{{ route('gdf.view.campesena') }}">
+        {{-- CAMPESENA --}}
+        @if(in_array($role, ['coord','support'], true) && $area === 'campesena')
+            <div class="gdf-side-section">Operación</div>
+
+            <a class="gdf-side-link {{ request()->routeIs('gdf.campesena.dashboard') ? 'active' : '' }}"
+               href="{{ route('gdf.campesena.dashboard') }}">
                 <i class="bi bi-tree"></i>
-                <span>Campesena</span>
+                <span>Dashboard Campesena</span>
             </a>
 
             <a class="gdf-side-link" href="#">
@@ -96,8 +110,10 @@
             </a>
         @endif
 
+        {{-- SOPORTE --}}
         <div class="gdf-side-section">Soporte</div>
-        <a class="gdf-side-link" href="{{ route('cefa.gdf.tecnologias') }}">
+        <a class="gdf-side-link {{ request()->routeIs('cefa.gdf.tecnologias') ? 'active' : '' }}"
+           href="{{ route('cefa.gdf.tecnologias') }}">
             <i class="bi bi-info-circle"></i>
             <span>Sobre el software</span>
         </a>

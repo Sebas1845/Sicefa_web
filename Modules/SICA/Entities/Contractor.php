@@ -76,5 +76,9 @@ class Contractor extends Model implements Auditable
     public function supervisor(){ // Accede a la información del supervisor asignado
         return $this->belongsTo(Person::class, 'supervisor_id');
     }
+    public function areaAssignments()
+{
+    return $this->hasMany(PersonAreaBudgetAssignment::class);
+}
 
 }

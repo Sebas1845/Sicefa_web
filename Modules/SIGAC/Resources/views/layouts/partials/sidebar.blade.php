@@ -492,7 +492,35 @@
                             </li>
                         @endif
                     @endif
-
+                    <!-- Menú de opciones para Coordinador Campesena SIGAC -->
+                    @if (Route::is('sigac.campesena.*'))
+                        <li class="nav-item">
+                            <a href="#" class="nav-link">
+                                <i class="nav-icon fas fa-book"></i>
+                                <p>
+                                    Solicitudes de Cursos
+                                    <i class="right fas fa-angle-left"></i>
+                                </p>
+                            </a>
+                            <ul class="nav nav-treeview items">
+                                <li class="nav-item">
+                                    <a href="{{ route('sigac.tutor.PermissionValidation.index') }}" class="nav-link">
+                                        <i class="nav-icon fas fa-file-invoice"></i>
+                                        <p>Solicitudes</p>
+                                    </a>
+                                </li>
+                            </ul>
+                            <ul class="nav nav-treeview items">
+                                <li class="nav-item">
+                                    <a href="{{ route('sigac.tutor.PermissionValidation.tutorValidationHistory') }}"
+                                        class="nav-link">
+                                        <i class="nav-icon fas fa-file-invoice"></i>
+                                        <p>Horarios</p>
+                                    </a>
+                                </li>
+                            </ul>
+                        </li>
+                    @endif
                     <!-- Menú de opciones para Instructor -->
                     @if (Route::is('sigac.instructor.*'))
                         <li class="nav-item">

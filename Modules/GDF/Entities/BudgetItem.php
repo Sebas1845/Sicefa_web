@@ -14,7 +14,12 @@ class BudgetItem extends Model
     protected $table = 'budget_items';
 
     protected $fillable = [
-        'code', 'name', 'description', 'allow_staff', 'allow_contractors', 'active',
+        'code',
+        'name',
+        'description',
+        'allow_staff',
+        'allow_contractors',
+        'active',
     ];
 
     protected $casts = [
@@ -31,5 +36,18 @@ class BudgetItem extends Model
     public function travelRequests()
     {
         return $this->hasMany(TravelRequest::class, 'budget_item_id');
+    }
+    public function personAssignments()
+    {
+        return $this->hasMany(PersonAreaBudgetAssignment::class);
+    }
+    public function areasAllowed()
+    {
+        return $this->belongsToMany(
+            \Modules\GDF\Entities\Area::class,
+            'area_budget_items',
+            'budget_item_id',
+            'area_id'
+        )->withPivot(['active', 'created_by', 'updated_by']);
     }
 }

@@ -10,9 +10,12 @@ class CreateTravelCostsTable extends Migration
     {
         Schema::create('travel_costs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('travel_request_id')->constrained('travel_requests')->cascadeOnDelete();
+            $table->foreignId('travel_request_id')
+                ->constrained('travel_requests')
+                ->cascadeOnDelete();
 
-            $table->enum('cost_type', ['transport','lodging','meals','other']);
+            // fuel para moto (gasolina como viático)
+            $table->enum('cost_type', ['transport','lodging','meals','fuel','other']);
             $table->string('description', 180)->nullable();
 
             $table->decimal('amount', 14, 2)->default(0);
@@ -23,6 +26,7 @@ class CreateTravelCostsTable extends Migration
             $table->index(['travel_request_id', 'cost_type']);
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('travel_costs');

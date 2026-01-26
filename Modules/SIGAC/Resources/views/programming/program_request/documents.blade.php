@@ -1,4 +1,5 @@
-<div class="modal fade" id="documents{{$prom->id}}" tabindex="-1" aria-labelledby="dates" aria-hidden="true">
+<!-- vista::program_request.documents -->
+<div class="modal fade" id="documents{{$pr->id}}" tabindex="-1" aria-labelledby="dates" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
@@ -6,7 +7,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                {!! Form::open(['url' => route('sigac.' . getRoleRouteName(Route::currentRouteName()) . '.programming.program_request.document_store', ['id' => $prom->id]), 'method' => 'POST', 'files' => true]) !!}
+                {!! Form::open(['url' => route('sigac.' . getRoleRouteName(Route::currentRouteName()) . '.programming.program_request.document_store', ['id' => $pr->id]), 'method' => 'POST', 'files' => true]) !!}
                 @csrf
                 <div class="form-group">
                     {!! Form::label('documents', 'Cédulas') !!}

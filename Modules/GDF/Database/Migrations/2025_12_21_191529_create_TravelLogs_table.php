@@ -10,7 +10,10 @@ class CreateTravelLogsTable extends Migration
     {
         Schema::create('travel_logs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('travel_request_id')->constrained('travel_requests')->cascadeOnDelete();
+            $table->foreignId('travel_request_id')
+                ->constrained('travel_requests')
+                ->cascadeOnDelete();
+
             $table->foreignId('user_id')->constrained('users');
 
             $table->string('action', 60); // CREATED, UPDATED, SUBMITTED, APPROVED, etc.
@@ -21,6 +24,7 @@ class CreateTravelLogsTable extends Migration
             $table->index(['travel_request_id', 'action']);
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('travel_logs');

@@ -5,6 +5,7 @@ namespace Modules\GDF\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Eloquent\Factory;
 
+
 class GDFServiceProvider extends ServiceProvider
 {
     /**

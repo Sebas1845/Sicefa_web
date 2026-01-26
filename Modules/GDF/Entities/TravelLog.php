@@ -3,25 +3,29 @@
 namespace Modules\GDF\Entities;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class TravelLog extends Model
 {
-    use HasFactory;
-
     protected $table = 'travel_logs';
-    public $timestamps = false; // only created_at
+
+    public $timestamps = false;
 
     protected $fillable = [
-        'travel_request_id', 'user_id', 'action', 'description', 'created_at',
+        'travel_request_id',
+        'user_id',
+        'action',
+        'description',
+        'created_at',
     ];
 
-    protected $casts = [
-        'created_at' => 'datetime',
-    ];
-
-    public function travelRequest()
+    public function request()
     {
-        return $this->belongsTo(TravelRequest::class, 'travel_request_id');
+        return $this->belongsTo(TravelRequest::class);
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class);
     }
 }
+

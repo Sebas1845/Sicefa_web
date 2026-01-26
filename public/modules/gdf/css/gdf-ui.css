@@ -1,9 +1,17 @@
+/* =======================================================================
+   GDF UI (gdf-ui.css) — Dark/Light listo para producción
+   - Controla fondo real (no depende del navegador)
+   - Evita “blanco feo” en light
+   - Corrige clases Bootstrap (text-white, text-white-50, border-white)
+   ======================================================================= */
+
 :root{
-  --gdf-green:#1f7a53;                 /* verde sobrio */
+  --gdf-green:#1f7a53;
   --gdf-green-soft:rgba(31,122,83,.18);
 
   --gdf-dark:#0b0f14;
   --gdf-dark-2:#0f151d;
+
   --gdf-surface:rgba(255,255,255,.06);
   --gdf-border:rgba(255,255,255,.10);
 
@@ -16,20 +24,43 @@
   --shadow-soft:0 16px 40px rgba(16,24,40,.10);
 
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  /* Importante: deja que el navegador pinte formularios acorde al tema */
+  color-scheme: light dark;
 }
 
+html, body{ min-height:100%; }
+
 body{
-  background: var(--gdf-dark);
+  background-color: var(--gdf-dark) !important;
   color:#fff;
 }
 
-/* THEMES */
+/* =======================================================================
+   THEME: LIGHT
+   ======================================================================= */
 body[data-theme="light"]{
-  background: var(--gdf-light);
-  color:#101828;
+  background-color: var(--gdf-light) !important;
+  color:#101828 !important;
+  color-scheme: light;
+}
+body[data-theme="dark"]{
+  color-scheme: dark;
 }
 
-/* NAVBAR */
+/* Ajustes globales para light */
+body[data-theme="light"] a{ color: rgba(16,24,40,.90); }
+body[data-theme="light"] a:hover{ color: rgba(16,24,40,1); }
+
+/* Bootstrap helpers que en light rompen (porque fuerzan blanco) */
+body[data-theme="light"] .text-white{ color:#101828 !important; }
+body[data-theme="light"] .text-white-50{ color: rgba(16,24,40,.65) !important; }
+body[data-theme="light"] .border-white{ border-color: rgba(16,24,40,.10) !important; }
+body[data-theme="light"] .border-opacity-10{ border-color: rgba(16,24,40,.10) !important; }
+
+/* =======================================================================
+   NAVBAR
+   ======================================================================= */
 .gdf-navbar{
   background: linear-gradient(90deg, rgba(11,15,20,.92), rgba(15,21,29,.92));
   border-bottom: 1px solid rgba(255,255,255,.06);
@@ -89,18 +120,62 @@ body[data-theme="light"]{
   color:#fff;
 }
 
-/* HERO */
+/* LIGHT NAVBAR */
+body[data-theme="light"] .gdf-navbar{
+  background: rgba(255,255,255,.85);
+  border-bottom: 1px solid var(--gdf-light-border);
+  backdrop-filter: blur(10px);
+}
+body[data-theme="light"] .navbar .nav-link{
+  color: rgba(16,24,40,.70);
+}
+body[data-theme="light"] .navbar .nav-link:hover,
+body[data-theme="light"] .navbar .nav-link.active{
+  color: rgba(16,24,40,.95);
+}
+body[data-theme="light"] .btn-gdf-ghost{
+  background: rgba(16,24,40,.04);
+  border-color: rgba(16,24,40,.10);
+  color: rgba(16,24,40,.92);
+}
+body[data-theme="light"] .btn-gdf-ghost:hover{
+  background: rgba(16,24,40,.06);
+  color: rgba(16,24,40,.98);
+}
+body[data-theme="light"] .btn-gdf-danger{
+  background: rgba(220,53,69,.08);
+  border-color: rgba(220,53,69,.22);
+  color: rgba(16,24,40,.92);
+}
+body[data-theme="light"] .btn-gdf-danger:hover{
+  background: rgba(220,53,69,.12);
+}
+body[data-theme="light"] .gdf-userpill{
+  background: rgba(16,24,40,.04);
+  border-color: rgba(16,24,40,.10);
+  color: rgba(16,24,40,.92);
+}
+
+/* =======================================================================
+   HERO (incluye carrusel)
+   ======================================================================= */
 .gdf-hero{
   position:relative;
-  padding: 72px 0 56px;
+  padding: 0; /* si usas carrusel, el padding lo das en el slide */
   border-bottom:1px solid rgba(255,255,255,.06);
-  background:
-    radial-gradient(1200px 500px at 20% 10%, rgba(31,122,83,.28), transparent 60%),
-    linear-gradient(180deg, rgba(11,15,20,.85), rgba(11,15,20,.92)),
-    var(--gdf-hero-image);
+  overflow:hidden;
+}
+
+/* Slide base */
+.gdf-hero-slide{
+  position:relative;
+  min-height: 520px;
+  padding: 72px 0 56px;
   background-size: cover;
   background-position: center;
-  overflow:hidden;
+  background-repeat: no-repeat;
+
+  background-image: var(--gdf-hero-image);
 }
 
 .gdf-hero-overlay{
@@ -109,9 +184,11 @@ body[data-theme="light"]{
   pointer-events:none;
 }
 
-.gdf-hero .container{ position:relative; z-index:2; }
+.gdf-hero .container,
+.gdf-hero-slide .container{ position:relative; z-index:2; }
 
 .gdf-badge{
+  display:inline-flex;
   background: rgba(255,255,255,.08);
   border: 1px solid rgba(255,255,255,.12);
   color:#fff;
@@ -125,6 +202,7 @@ body[data-theme="light"]{
   line-height: 1.05;
   font-size: clamp(2rem, 3.2vw, 3.1rem);
   margin: 0 0 12px;
+  color:#fff;
 }
 
 .gdf-hero-subtitle{
@@ -169,21 +247,168 @@ body[data-theme="light"]{
   font-size:.85rem;
 }
 
-.gdf-hero-down{
-  margin-top: 28px;
-  display:flex;
-  justify-content:center;
-}
-.gdf-scroll{
+/* Scroll down button (si lo usas) */
+.gdf-hero-scroll{
+  position:absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
   width:46px;height:46px;
   display:flex;align-items:center;justify-content:center;
   border-radius: 999px;
   background: rgba(255,255,255,.08);
   border:1px solid rgba(255,255,255,.12);
   color:#fff;
+  z-index: 3;
+  text-decoration:none;
+}
+.gdf-hero-scroll:hover{
+  background: rgba(255,255,255,.12);
+  color:#fff;
 }
 
-/* SIDEBAR */
+/* Indicadores carrusel más suaves */
+.gdf-hero .carousel-indicators [data-bs-target]{
+  width: 28px;
+  height: 4px;
+  border-radius: 999px;
+  opacity: .45;
+}
+.gdf-hero .carousel-indicators .active{
+  opacity: .95;
+}
+
+/* LIGHT HERO: overlay claro + texto oscuro */
+body[data-theme="light"] .gdf-hero{
+  border-bottom:1px solid var(--gdf-light-border);
+}
+body[data-theme="light"] .gdf-hero-overlay{
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,.90),
+    rgba(255,255,255,.55),
+    rgba(255,255,255,.88)
+  ) !important;
+}
+body[data-theme="light"] .gdf-badge{
+  background: rgba(16,24,40,.04);
+  border: 1px solid rgba(16,24,40,.10);
+  color: rgba(16,24,40,.90);
+}
+body[data-theme="light"] .gdf-hero-title{ color: rgba(16,24,40,.98) !important; }
+body[data-theme="light"] .gdf-hero-subtitle{ color: rgba(16,24,40,.72) !important; }
+body[data-theme="light"] .gdf-mini{
+  background: rgba(16,24,40,.03);
+  border-color: rgba(16,24,40,.10);
+  color: rgba(16,24,40,.85);
+}
+body[data-theme="light"] .gdf-hero-scroll{
+  background: rgba(16,24,40,.04);
+  border-color: rgba(16,24,40,.10);
+  color: rgba(16,24,40,.90);
+}
+body[data-theme="light"] .gdf-hero-scroll:hover{
+  background: rgba(16,24,40,.06);
+}
+
+/* =======================================================================
+   CARDS / SURFACES (útil para gdf-card, paneles, etc.)
+   ======================================================================= */
+.gdf-card{
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+/* LIGHT: cards legibles */
+body[data-theme="light"] .gdf-card{
+  background: #fff;
+  border-color: var(--gdf-light-border);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: none;
+}
+
+/* Inputs mejor en dark (sin dejar “blanco” raro) */
+body:not([data-theme="light"]) .form-control,
+body:not([data-theme="light"]) .form-select{
+  background-color: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.10);
+  color:#fff;
+}
+body:not([data-theme="light"]) .form-control::placeholder{
+  color: rgba(255,255,255,.55);
+}
+body:not([data-theme="light"]) .form-control:focus,
+body:not([data-theme="light"]) .form-select:focus{
+  background-color: rgba(255,255,255,.08);
+  border-color: rgba(31,122,83,.45);
+  box-shadow: 0 0 0 .2rem rgba(31,122,83,.18);
+  color:#fff;
+}
+
+/* Inputs en light */
+body[data-theme="light"] .form-control,
+body[data-theme="light"] .form-select{
+  background-color: #fff;
+  border-color: rgba(16,24,40,.14);
+  color:#101828;
+}
+body[data-theme="light"] .form-control::placeholder{
+  color: rgba(16,24,40,.45);
+}
+body[data-theme="light"] .form-control:focus,
+body[data-theme="light"] .form-select:focus{
+  border-color: rgba(31,122,83,.55);
+  box-shadow: 0 0 0 .2rem rgba(31,122,83,.18);
+}
+
+/* =======================================================================
+   QUICKLINK (tarjetas con icono)
+   ======================================================================= */
+.gdf-quicklink{
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  padding:14px 14px;
+  border-radius:16px;
+  text-decoration:none;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  color:#fff;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.gdf-quicklink:hover{
+  transform: translateY(-2px);
+  background: rgba(255,255,255,.08);
+  border-color: rgba(31,122,83,.35);
+  color:#fff;
+}
+.gdf-quicklink i{
+  font-size: 1.3rem;
+  color: rgba(255,255,255,.90);
+  margin-top:2px;
+}
+
+body[data-theme="light"] .gdf-quicklink{
+  background: #fff;
+  border-color: rgba(16,24,40,.10);
+  color: rgba(16,24,40,.92);
+  box-shadow: var(--shadow-soft);
+}
+body[data-theme="light"] .gdf-quicklink:hover{
+  background: #fff;
+  border-color: rgba(31,122,83,.35);
+  color: rgba(16,24,40,.98);
+}
+body[data-theme="light"] .gdf-quicklink i{
+  color: rgba(16,24,40,.75);
+}
+
+/* =======================================================================
+   SIDEBAR
+   ======================================================================= */
 .gdf-sidebar{
   width: 290px;
   background: linear-gradient(180deg, rgba(11,15,20,.96), rgba(15,21,29,.96));
@@ -195,9 +420,7 @@ body[data-theme="light"]{
   border-radius: 16px;
 }
 
-.gdf-sidebar.collapsed{
-  width: 92px;
-}
+.gdf-sidebar.collapsed{ width: 92px; }
 
 .gdf-sidebar-header{
   padding: 14px 14px 10px;
@@ -252,57 +475,73 @@ body[data-theme="light"]{
   border-top: 1px solid rgba(255,255,255,.06);
 }
 
-/* FOOTER */
+/* LIGHT SIDEBAR */
+body[data-theme="light"] .gdf-sidebar{
+  background: #fff;
+  border-right: 1px solid var(--gdf-light-border);
+  box-shadow: var(--shadow-soft);
+}
+body[data-theme="light"] .gdf-sidebar-header{
+  border-bottom: 1px solid var(--gdf-light-border);
+}
+body[data-theme="light"] .gdf-side-section{
+  color: rgba(16,24,40,.50);
+}
+body[data-theme="light"] .gdf-side-link{
+  color: rgba(16,24,40,.82);
+}
+body[data-theme="light"] .gdf-side-link:hover{
+  background: rgba(16,24,40,.03);
+  border-color: rgba(16,24,40,.08);
+  color: rgba(16,24,40,.95);
+}
+body[data-theme="light"] .gdf-side-link.active{
+  background: rgba(31,122,83,.10);
+  border-color: rgba(31,122,83,.25);
+  color: rgba(16,24,40,.95);
+}
+body[data-theme="light"] .gdf-sidebar-footer{
+  border-top: 1px solid var(--gdf-light-border);
+}
+
+/* =======================================================================
+   FOOTER
+   ======================================================================= */
 .gdf-footer{
   border-top: 1px solid rgba(255,255,255,.06);
   background: rgba(11,15,20,.92);
   color:#fff;
-}
-
-/* LIGHT THEME OVERRIDES */
-body[data-theme="light"] .gdf-navbar{
-  background: rgba(255,255,255,.85);
-  border-bottom: 1px solid var(--gdf-light-border);
-}
-body[data-theme="light"] .navbar .nav-link{
-  color: rgba(16,24,40,.70);
-}
-body[data-theme="light"] .navbar .nav-link:hover,
-body[data-theme="light"] .navbar .nav-link.active{
-  color: rgba(16,24,40,.95);
-}
-body[data-theme="light"] .btn-gdf-ghost{
-  background: rgba(16,24,40,.04);
-  border-color: rgba(16,24,40,.10);
-  color: rgba(16,24,40,.92);
 }
 body[data-theme="light"] .gdf-footer{
   background:#fff;
   color:#101828;
   border-top: 1px solid var(--gdf-light-border);
 }
+body[data-theme="light"] .gdf-footer .text-white{ color:#101828 !important; }
+body[data-theme="light"] .gdf-footer .text-white-50{ color: rgba(16,24,40,.65) !important; }
 
-.gdf-quicklink{
-  display:flex;
-  gap:12px;
-  align-items:flex-start;
-  padding:14px 14px;
-  border-radius:16px;
-  text-decoration:none;
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.10);
-  color:#fff;
-  transition: transform .15s ease, background .15s ease, border-color .15s ease;
-}
-.gdf-quicklink:hover{
-  transform: translateY(-2px);
-  background: rgba(255,255,255,.08);
-  border-color: rgba(31,122,83,.35);
-  color:#fff;
-}
-.gdf-quicklink i{
-  font-size: 1.3rem;
-  color: rgba(255,255,255,.90);
-  margin-top:2px;
+/* =======================================================================
+   UTIL: pequeñas correcciones visuales
+   ======================================================================= */
+.badge.text-bg-success{ background-color: rgba(31,122,83,.85) !important; }
+body[data-theme="light"] .badge.text-bg-success{ background-color: rgba(31,122,83,.90) !important; }
+
+/* Tablas en dark */
+body:not([data-theme="light"]) .table{
+  --bs-table-color: rgba(255,255,255,.88);
+  --bs-table-bg: transparent;
+  --bs-table-border-color: rgba(255,255,255,.10);
+  --bs-table-striped-bg: rgba(255,255,255,.03);
+  --bs-table-hover-bg: rgba(255,255,255,.04);
 }
 
+/* Alerts en dark (para que no queden chillones) */
+body:not([data-theme="light"]) .alert{
+  border-color: rgba(255,255,255,.10);
+}
+
+/* Opcional: mejora la selección de texto */
+::selection{
+  background: rgba(31,122,83,.35);
+  color: inherit;
+}

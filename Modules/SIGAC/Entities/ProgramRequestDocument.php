@@ -14,6 +14,7 @@ class ProgramRequestDocument extends Model implements Auditable
         'program_request_id',
         'name',
         'path',
+        'role'
     ];
 
     protected $dates = ['deleted_at']; // Atributos que deben ser tratados como objetos Carbon

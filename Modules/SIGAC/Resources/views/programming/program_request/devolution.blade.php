@@ -1,3 +1,5 @@
+<!-- vista::program_request.devolution -->
+
 <div class="modal fade" id="devolution{{$prom->id}}" tabindex="-1" aria-labelledby="dates" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">

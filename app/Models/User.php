@@ -13,82 +13,156 @@ use Modules\SICA\Entities\Person;
 use OwenIt\Auditing\Contracts\Auditable;
 use App\Models\Traits\UserTrait;
 use Illuminate\Support\Facades\Hash;
+use Modules\GDF\Entities\PersonAreaBudgetAssignment;
+
 
 class User extends Authenticatable implements Auditable
 {
+    use SoftDeletes,
+        HasApiTokens,
+        Notifiable,
+        UserTrait,
+        \OwenIt\Auditing\Auditable;
 
-    use SoftDeletes, // Borrado suave
-        HasApiTokens, // Trait que permite la autenticación del usuario a través de tokens API.
-        Notifiable, // Trait que permite el envío de notificaciones a través de diferentes canales, como correo electrónico, SMS y notificaciones push.
-        UserTrait, // Trait para validar permisos defenidos o full_access del usuario
-        \OwenIt\Auditing\Auditable; // Seguimientos de cambios realizados en BD
-
-    protected $fillable = [ // Atributos modificables (asignación masiva)
+    /**
+     * Asignación masiva
+     */
+    protected $fillable = [
         'nickname',
         'person_id',
         'email',
         'image',
         'password',
+        'force_password_change', // ✅ NUEVO (no afecta nada existente)
     ];
 
-    protected $hidden = [ // Atributos ocultos
+    /**
+     * Campos ocultos
+     */
+    protected $hidden = [
         'password',
         'remember_token',
         'created_at',
         'updated_at'
     ];
 
-    protected $casts = [ // Serialización o casteo de atributos (define en qué forma se debe recuperar el dato de la base de datos)
-        'email_verified_at' => 'datetime'
+    /**
+     * Casts
+     */
+    protected $casts = [
+        'email_verified_at'     => 'datetime',
+        'force_password_change' => 'boolean', // ✅ NUEVO
     ];
 
-    protected $dates = [ // Atributos que deben ser tratados como objetos Carbon
+    /**
+     * Fechas
+     */
+    protected $dates = [
         'deleted_at'
     ];
 
-    // RELACIONES
-    public function person(){ // Accede a la información de la persona asociada a este usuario
+    /*
+    |--------------------------------------------------------------------------
+    | RELACIONES
+    |--------------------------------------------------------------------------
+    */
+
+    public function person()
+    {
         return $this->belongsTo(Person::class);
     }
-    public function roles(){ // Accede a todos los roles que pertenecen a este usuario (PIVOTE)
+
+    public function roles()
+    {
         return $this->belongsToMany(Role::class)->withTimestamps();
     }
 
-    // CONFIGURACIONES PREESTABLECIDAS PARA MÉTODOS ELOQUENT
     /**
-     * The "booting" method of the model.
-     *
-     * @return void
+     * Tokens de acceso (link mágico)
+     */
+    public function loginTokens() // ✅ NUEVO (NO interfiere con nada)
+    {
+        return $this->hasMany(LoginToken::class);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | HELPERS (NO OBLIGATORIOS, PERO ÚTILES)
+    |--------------------------------------------------------------------------
     */
+
+    public function mustChangePassword(): bool
+    {
+        return (bool) $this->force_password_change;
+    }
+
+    public function requirePasswordChange(): void
+    {
+        $this->force_password_change = true;
+        $this->save();
+    }
+
+    public function clearPasswordChange(): void
+    {
+        $this->force_password_change = false;
+        $this->save();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | BOOT (SE DEJA EXACTAMENTE IGUAL)
+    |--------------------------------------------------------------------------
+    */
+
     protected static function boot()
     {
         parent::boot();
+
         static::creating(function ($user) {
-            if (empty($user->password)) { // Verificar si se recibe una contraseña por defecto para así crear una por defecto
-                $first_name = Str::ascii($user->person->first_name); // Eliminar caracteres especiales del nombre
-                $first_last_name = Str::ascii($user->person->first_last_name); // Eliminar caracteres especiales del primer apellido
-                $password = Hash::make( // Encriptar contraseña generada
-                    ucfirst( // Convertir el primer caracter en mayúscula
-                        strtolower( // Convertir todo en minúsculas
-                            substr($first_name, 0, 2) // Extraer los dos primeros caracteres del nombre
-                            .substr($first_last_name, 0, 2) // Extraer los dos primeros caracteres del primer apellido
-                            .substr($user->person->document_number, -4) // Extraer los cuatro últimos caracteres del número de documento
+
+            // ⚠️ NO SE TOCA ESTA LÓGICA
+            if (empty($user->password)) {
+
+                $first_name = Str::ascii($user->person->first_name);
+                $first_last_name = Str::ascii($user->person->first_last_name);
+
+                $password = Hash::make(
+                    ucfirst(
+                        strtolower(
+                            substr($first_name, 0, 2)
+                                . substr($first_last_name, 0, 2)
+                                . substr($user->person->document_number, -4)
                         )
                     )
                 );
-                $user->password =$password;
 
-                // Obtener el ID de usuario
-                $user_id =$user->person->id;
+                $user->password = $password;
 
-                // Guardar la contraseña en la sesión asociada al ID de usuario
+                $user_id = $user->person->id;
+
                 session(['passwords.' . $user_id => $password]);
 
-                // Acceder a la contraseña del usuario actual
                 $password = session('passwords.' . $user_id);
-       
             }
         });
     }
 
+    public function gdfAreas()
+    {
+        return $this->belongsToMany(\Modules\GDF\Entities\Area::class, 'gdf_area_user', 'user_id', 'area_id')
+            ->withPivot(['active', 'scope', 'assigned_by'])
+            ->withTimestamps();
+    }
+
+
+    public function supervisedAssignments()
+    {
+        return $this->hasMany(PersonAreaBudgetAssignment::class, 'supervisor_id');
+    }
+    public function activeGdfAreas()
+    {
+        return $this->belongsToMany(\Modules\GDF\Entities\Area::class, 'gdf_area_user')
+            ->withPivot(['scope', 'active'])
+            ->wherePivot('active', 1);
+    }
 }

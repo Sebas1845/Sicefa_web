@@ -500,8 +500,9 @@
             }
 
             var authUser = <?= json_encode($user); ?>;
-
-            @if(auth()->check())
+            @if (Route::is('cefa.sigac.programming.index'))
+                var url = "{{ route('cefa.sigac.programming.management.search') }}";
+            @elseif(auth()->check())
                 var url = "{{ route('sigac.'. getRoleRouteName(Route::currentRouteName()) .'.programming.management.search') }}";
             @else  
                 var url = "{{ route('cefa.sigac.programming.management.search') }}";
@@ -657,7 +658,9 @@
 
             // Actualizar el título del <h4>
             $('#titulo').text(titulo);
-            @if(auth()->check())
+            @if (Route::is('cefa.sigac.programming.index'))
+                var url = "{{ route('cefa.sigac.programming.management.filter') }}";
+            @elseif(auth()->check())
                 var url = "{{ route('sigac.'. getRoleRouteName(Route::currentRouteName()) .'.programming.management.filter') }}";
             @else  
                 var url = "{{ route('cefa.sigac.programming.management.filter') }}";

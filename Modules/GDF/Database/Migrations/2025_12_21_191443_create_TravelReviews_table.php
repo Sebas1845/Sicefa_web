@@ -10,7 +10,10 @@ class CreateTravelReviewsTable extends Migration
     {
         Schema::create('travel_reviews', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('travel_request_id')->constrained('travel_requests')->cascadeOnDelete();
+            $table->foreignId('travel_request_id')
+                ->constrained('travel_requests')
+                ->cascadeOnDelete();
+
             $table->foreignId('reviewer_id')->constrained('users');
 
             $table->enum('action', ['submitted','returned','rejected','approved']);
@@ -21,6 +24,7 @@ class CreateTravelReviewsTable extends Migration
             $table->index(['travel_request_id', 'action']);
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('travel_reviews');

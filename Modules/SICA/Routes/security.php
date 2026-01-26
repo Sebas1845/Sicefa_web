@@ -9,6 +9,7 @@ use Modules\SICA\Http\Controllers\security\OtpAuthController;
 
 Route::middleware(['lang'])->group(function () {
 
+
     Route::prefix('sica')->group(function () {
 
         // --------------  Rutas de Aplicaciones ---------------------------------
@@ -44,17 +45,23 @@ Route::middleware(['lang'])->group(function () {
         Route::post('/admin/security/users/update/{user}', [UserController::class, 'update'])->name('sica.admin.security.users.update'); /* Actualizar usuario (Administrador) */
         Route::delete('/admin/security/users/destroy/{user}', [UserController::class, 'destroy'])->name('sica.admin.security.users.destroy'); /* Eliminar usuario (Administrador) */
         // --------------  Rutas de registro de usuarios con codigo  ---------------------------------
-        Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
-        Route::post('/profile/email', [ProfileController::class, 'updateEmail'])->name('profile.email.update');
 
-        Route::get('/otp-login', [OtpAuthController::class, 'showDocumentForm'])->name('otp.login.form');
-        Route::post('/otp-login', [OtpAuthController::class, 'sendOtp'])->name('otp.login.send');
+        Route::get('/otp-login', [OtpAuthController::class, 'showDocumentForm'])->name('otp.login.document.form');
+        Route::post('/otp-login', [OtpAuthController::class, 'registerOrSendOtp'])->name('otp.login.send');
 
         Route::get('/otp-login/verify', [OtpAuthController::class, 'showOtpForm'])->name('otp.login.verify.form');
         Route::post('/otp-login/verify', [OtpAuthController::class, 'verifyOtp'])->name('otp.login.verify');
 
-        // Reutilizas tu pantalla actual de cambio de contraseña
-        Route::get('/otp-login/password/change', [UserController::class, 'change'])->name('otp.password.change.form');
-        Route::post('/otp-login/password/change', [UserController::class, 'changesave'])->name('otp.password.change.save');
+        Route::get('/otp-login/password', [OtpAuthController::class, 'showPasswordChangeForm'])->name('otp.login.password.form');
+        Route::post('/otp-login/password', [OtpAuthController::class, 'savePasswordChange'])->name('otp.login.password.save');
+
+        Route::middleware(['auth'])->group(function () {
+
+            Route::get('/profile', [ProfileController::class, 'show'])
+                ->name('profile.show');
+
+            Route::post('/profile/email', [ProfileController::class, 'updateEmail'])
+                ->name('profile.email.update');
+        });
     });
 });

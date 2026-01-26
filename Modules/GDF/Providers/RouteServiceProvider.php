@@ -4,6 +4,7 @@ namespace Modules\GDF\Providers;
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
+use Modules\GDF\Http\Middleware\GdfRoleGuard;   
 
 class RouteServiceProvider extends ServiceProvider
 {
@@ -24,6 +25,11 @@ class RouteServiceProvider extends ServiceProvider
     public function boot()
     {
         parent::boot();
+
+        /** @var Router $router */
+        $router = $this->app['router'];
+
+        $router->aliasMiddleware('gdf.role', GdfRoleGuard::class);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Modules\SIGAC\Entities;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Modules\SIGAC\Entities\ApprenticePermission;
 
 class PermissionValidation extends Model
 {

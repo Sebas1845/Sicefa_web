@@ -14,7 +14,9 @@ class Area extends Model
     protected $table = 'areas';
 
     protected $fillable = [
-        'name', 'description', 'active',
+        'name',
+        'description',
+        'active',
     ];
 
     protected $casts = [
@@ -29,5 +31,37 @@ class Area extends Model
     public function travelRequests()
     {
         return $this->hasMany(TravelRequest::class, 'area_id');
+    }
+    public function users()
+    {
+        return $this->belongsToMany(\App\Models\User::class, 'gdf_area_user', 'area_id', 'user_id')
+            ->withPivot(['active', 'assigned_by', 'scope'])
+            ->withTimestamps();
+    }
+
+    public function activeUsers()
+    {
+        return $this->users()->wherePivot('active', true);
+    }
+    public function personAssignments()
+    {
+        return $this->hasMany(PersonAreaBudgetAssignment::class);
+    }
+    // Rubros permitidos (pivote con metadata)
+    public function areaBudgetItems()
+    {
+        return $this->hasMany(\Modules\GDF\Entities\AreaBudgetItem::class, 'area_id');
+    }
+
+    // Rubros permitidos (solo catálogo BudgetItem)
+    public function allowedBudgetItems()
+    {
+        return $this->belongsToMany(
+            \Modules\GDF\Entities\BudgetItem::class,
+            'area_budget_items',
+            'area_id',
+            'budget_item_id'
+        )->withPivot(['active', 'created_by', 'updated_by'])
+            ->wherePivot('active', true);
     }
 }

@@ -2,11 +2,12 @@
 
 namespace Modules\SIGAC\Http\Controllers;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Routing\Controller;
-use DataTables;
-use Illuminate\Http\Request;    
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Modules\SICA\Entities\Employee;
 use Modules\SICA\Entities\Contractor;
 use Modules\SICA\Entities\Environment;
@@ -16,6 +17,7 @@ use Modules\SICA\Entities\Department;
 use Modules\SICA\Entities\LearningOutcomePerson;
 use Modules\SICA\Entities\Municipality;
 use Modules\SICA\Entities\Holiday;
+use Modules\SICA\Entities\Village;
 use Modules\SIGAC\Entities\InstructorProgram;
 use Modules\SIGAC\Entities\ExternalActivity;
 use Modules\SIGAC\Entities\Profession;
@@ -29,7 +31,7 @@ use Modules\SIGAC\Entities\InstructorProgramPerson;
 use Modules\SIGAC\Entities\EnvironmentInstructorProgram;
 use Modules\SIGAC\Entities\InstructorProgramOutcome;
 use Modules\SIGAC\Entities\ProgramRequestDocument;
-use DB;
+use Illuminate\Support\Facades\DB;
 use Modules\SICA\Entities\Person;
 use Modules\SICA\Entities\Program;
 use Modules\SICA\Entities\Competencie;
@@ -47,18 +49,27 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use ZipArchive;
 use Excel, Exception;
-use Illuminate\Support\Str;
+use Modules\SICA\Entities\Apprentice;
+use Yajra\DataTables\Facades\DataTables;
+use Modules\SICA\Entities\EPS;
+use Modules\SICA\Entities\PopulationGroup;
+use Modules\SICA\Entities\PensionEntity;
+use hasRole;
+use App\Mail\SIGAC\ProgramRequest\ProgramRequestStatusMail;
+use Illuminate\Support\Facades\Mail;
+
+
+
 
 class ProgrammeController extends Controller
 {
-  
-
     // Programación de horarios
     public function programming()
     {
-
         $app = App::where('name', 'SIGAC')->orWhere('name', 'CEFAMAPS')->get();
 
         foreach ($app as $a) {
@@ -67,19 +78,19 @@ class ProgrammeController extends Controller
 
         $user = Auth::user();
         $roles = '';
-        if($user){
-            $slug  = Role::whereIn('app_id', $app_id)
-            ->whereHas('users', function ($query) use ($user) {
-                $query->where('users.id', $user->id);
-            })->pluck('slug')->first();        
-    
-            if($slug == 'sigac.academic_coordinator' || $slug == 'superadmin'){
+        if ($user) {
+            $slug = Role::whereIn('app_id', $app_id)
+                ->whereHas('users', function ($query) use ($user) {
+                    $query->where('users.id', $user->id);
+                })->pluck('slug')->first();
+
+            if ($slug == 'sigac.academic_coordinator' || $slug == 'superadmin') {
                 $roles = 'academic_coordination';
-            }else{
+            } else {
                 $roles = Str::replaceFirst('sigac.', '', $slug);
             }
         }
-        
+
 
         $days = [
             'Monday' => 'Lunes',
@@ -115,7 +126,7 @@ class ProgrammeController extends Controller
 
         return view('sigac::programming.index', $view);
     }
-    
+
 
     // Gestion de la programacion
     public function management_programming()
@@ -133,51 +144,51 @@ class ProgrammeController extends Controller
     public function management_programming_filterquarterlie(Request $request)
     {
         $course_id = $request->input('course_id');
-        $quarter_number =$request->input('quarter_number');
+        $quarter_number = $request->input('quarter_number');
 
-        $executed_programming = InstructorProgramOutcome::whereHas('instructor_program', function($query) use ($course_id){
+        $executed_programming = InstructorProgramOutcome::whereHas('instructor_program', function ($query) use ($course_id) {
             $query->where('instructor_programs.course_id', $course_id);
         })
-        ->select('learning_outcome_id', \DB::raw('hour as total_executed_hours'))
-        ->groupBy('hour', 'learning_outcome_id')
-        ->pluck('total_executed_hours', 'learning_outcome_id')
-        ->toArray();
+            ->select('learning_outcome_id', \DB::raw('hour as total_executed_hours'))
+            ->groupBy('hour', 'learning_outcome_id')
+            ->pluck('total_executed_hours', 'learning_outcome_id')
+            ->toArray();
 
-        
+
 
         $outcomes_not_programming = Quarterly::with('learning_outcome.competencie', 'learning_outcome.instructor_program_outcomes.instructor_program')
-        ->whereHas('training_project.courses', function($query) use ($course_id) {
-            $query->where('courses.id', $course_id);
-        })
-        ->where('quarter_number', '<', $quarter_number)
-        ->get() // Obtener todos los resultados relevantes
-        ->filter(function ($quarterly) use ($executed_programming) {
-            $learning_outcome_id = $quarterly->learning_outcome_id;
-            $planned_hours = $quarterly->hour; // Horas planeadas en 'Quarterly'
-            $executed_hours = $executed_programming[$learning_outcome_id] ?? 0; // Horas ejecutadas o 0 si no existe
+            ->whereHas('training_project.courses', function ($query) use ($course_id) {
+                $query->where('courses.id', $course_id);
+            })
+            ->where('quarter_number', '<', $quarter_number)
+            ->get() // Obtener todos los resultados relevantes
+            ->filter(function ($quarterly) use ($executed_programming) {
+                $learning_outcome_id = $quarterly->learning_outcome_id;
+                $planned_hours = $quarterly->hour; // Horas planeadas en 'Quarterly'
+                $executed_hours = $executed_programming[$learning_outcome_id] ?? 0; // Horas ejecutadas o 0 si no existe
 
-            // Incluir si el resultado no ha sido ejecutado o si las horas ejecutadas son menores a las horas planeadas
-            return $executed_hours < $planned_hours;
-        })
-        ->groupBy(function ($quarterly) use ($quarter_number) {
-            $competencieName = $quarterly->learning_outcome->competencie->name;
-            return str_replace('-' . $quarter_number, '', $competencieName); // Agrupar por nombre de competencia
-        });
-    
+                // Incluir si el resultado no ha sido ejecutado o si las horas ejecutadas son menores a las horas planeadas
+                return $executed_hours < $planned_hours;
+            })
+            ->groupBy(function ($quarterly) use ($quarter_number) {
+                $competencieName = $quarterly->learning_outcome->competencie->name;
+                return str_replace('-' . $quarter_number, '', $competencieName); // Agrupar por nombre de competencia
+            });
+
         debug($outcomes_not_programming);
 
         $quarterlie = Quarterly::with('learning_outcome.competencie')
-        ->where('quarter_number', $quarter_number)
-        ->whereHas('training_project.courses', function($query) use ($course_id) {
-            $query->where('courses.id', $course_id);
-        })
-        ->get()
-        ->groupBy(function ($quarterly) use ($quarter_number) {
-            $competencieName = $quarterly->learning_outcome->competencie->name;
-            return str_replace('-' . $quarter_number, '', $competencieName);
-        });
+            ->where('quarter_number', $quarter_number)
+            ->whereHas('training_project.courses', function ($query) use ($course_id) {
+                $query->where('courses.id', $course_id);
+            })
+            ->get()
+            ->groupBy(function ($quarterly) use ($quarter_number) {
+                $competencieName = $quarterly->learning_outcome->competencie->name;
+                return str_replace('-' . $quarter_number, '', $competencieName);
+            });
 
-    
+
         return response()->json(['quarterlie' => $quarterlie, 'outcomes_not_programming' => $outcomes_not_programming]);
     }
 
@@ -185,9 +196,9 @@ class ProgrammeController extends Controller
     {
         $course_id = $request->input('course_id');
 
-        $learning_outcome = LearningOutcome::whereHas('competencie.program.courses', function($query) use ($course_id) {
+        $learning_outcome = LearningOutcome::whereHas('competencie.program.courses', function ($query) use ($course_id) {
             $query->where('courses.id', $course_id);
-        })->pluck('name','id');
+        })->pluck('name', 'id');
 
         return response()->json(['learning_outcome' => $learning_outcome->toArray()]);
     }
@@ -196,27 +207,27 @@ class ProgrammeController extends Controller
     {
         $learning_outcome_id = $request->input('learning_outcome_id');
         $admin = $request->input('admin');
-        
+
 
         if ($admin == 'true') {
             $getInstructor = DB::table('employees')
-            ->join('employee_types', 'employees.employee_type_id', '=', 'employee_types.id')
-            ->join('people', 'employees.person_id', '=', 'people.id')
-            ->where('state', 'Activo')
-            ->where('employee_types.name', 'Instructor')
-            ->select('people.id','people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
-            ->union(
-                DB::table('contractors')
-                ->join('employee_types', 'contractors.employee_type_id', '=', 'employee_types.id')
-                ->join('people', 'contractors.person_id', '=', 'people.id')
+                ->join('employee_types', 'employees.employee_type_id', '=', 'employee_types.id')
+                ->join('people', 'employees.person_id', '=', 'people.id')
                 ->where('state', 'Activo')
                 ->where('employee_types.name', 'Instructor')
-                ->select('people.id','people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
-            )->get();
+                ->select('people.id', 'people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
+                ->union(
+                    DB::table('contractors')
+                        ->join('employee_types', 'contractors.employee_type_id', '=', 'employee_types.id')
+                        ->join('people', 'contractors.person_id', '=', 'people.id')
+                        ->where('state', 'Activo')
+                        ->where('employee_types.name', 'Instructor')
+                        ->select('people.id', 'people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
+                )->get();
             $instructors = $getInstructor->map(function ($i) {
                 $id = $i->id;
                 $name = $i->first_name . ' ' . $i->first_last_name . ' ' . $i->second_last_name;
-    
+
                 return [
                     'id' => $id,
                     'first_name' => $name
@@ -224,28 +235,27 @@ class ProgrammeController extends Controller
             });
         } else {
             $instructors = Person::join('learning_outcome_people', 'people.id', '=', 'learning_outcome_people.person_id')
-            ->where('learning_outcome_people.learning_outcome_id', $learning_outcome_id)
-            ->orderBy('learning_outcome_people.priority', 'asc')
-            ->get(['people.id', 'people.first_name']);
+                ->where('learning_outcome_people.learning_outcome_id', $learning_outcome_id)
+                ->orderBy('learning_outcome_people.priority', 'asc')
+                ->get(['people.id', 'people.first_name']);
         }
-    
+
         return response()->json(['instructors' => $instructors]);
     }
-    
+
 
     public function management_programming_filterenvironment(Request $request)
     {
         $admin = $request->input('admin');
-        $learning_outcome = LearningOutcome::findOrfail($request->input('learning_outcome_id')) ;
+        $learning_outcome = LearningOutcome::findOrfail($request->input('learning_outcome_id'));
         $competencie_id = $learning_outcome->competencie->id;
 
         if ($admin == 'true') {
-            $environments = Environment::get()->pluck('name','id');
+            $environments = Environment::get()->pluck('name', 'id');
         } else {
-            $environments = Environment::whereHas('class_environment.competencies', function($query) use ($competencie_id) {
+            $environments = Environment::whereHas('class_environment.competencies', function ($query) use ($competencie_id) {
                 $query->where('competencies.id', $competencie_id);
-            })->pluck('name','id');
-            
+            })->pluck('name', 'id');
         }
 
 
@@ -258,11 +268,11 @@ class ProgrammeController extends Controller
         $course_id = $request->input('course_id');
 
         // Obtener la lista de programas de instructor asociados al resultado de aprendizaje
-        $instructor_programs = InstructorProgram::whereHas('instructor_program_outcomes', function($query) use ($learning_outcome_id) {
+        $instructor_programs = InstructorProgram::whereHas('instructor_program_outcomes', function ($query) use ($learning_outcome_id) {
             $query->where('learning_outcome_id', $learning_outcome_id);
         })
-        ->where('course_id', $course_id)
-        ->get();
+            ->where('course_id', $course_id)
+            ->get();
 
         // Verificar si el resultado de aprendizaje está programado
         if ($instructor_programs->isEmpty()) {
@@ -279,7 +289,7 @@ class ProgrammeController extends Controller
                     if ($outcome->learning_outcome_id == $learning_outcome_id) {
                         // Sumamos las horas de este resultado de aprendizaje
                         $hours = $outcome->hour;
-            
+
                         // Guardamos la información programada para este resultado de aprendizaje
                         $scheduled_info[] = [
                             'date' => $program->date,
@@ -287,7 +297,7 @@ class ProgrammeController extends Controller
                             'start_time' => $program->start_time,
                             'end_time' => $program->end_time
                         ];
-            
+
                         // Rompemos el ciclo porque solo necesitamos registrar una vez el resultado de aprendizaje seleccionado
                         break;
                     }
@@ -325,70 +335,70 @@ class ProgrammeController extends Controller
         $c_modality = Course::findOrFail($course_id);
 
         foreach ($fechas as $f) {
-            if($modality == 1 || $c_modality->deschooling == 'Virtual'){
+            if ($modality == 1 || $c_modality->deschooling == 'Virtual') {
                 $programming = InstructorProgram::where('date', $f)
-                ->where(function ($query) use ($request) {
-                    $query->where(function ($q) use ($request) {
-                        $q->where('start_time', '>=', $request->start_time)
-                            ->where('start_time', '<=', $request->end_time);
+                    ->where(function ($query) use ($request) {
+                        $query->where(function ($q) use ($request) {
+                            $q->where('start_time', '>=', $request->start_time)
+                                ->where('start_time', '<=', $request->end_time);
+                        })
+                            ->orWhere(function ($q) use ($request) {
+                                $q->where('end_time', '>=', $request->start_time)
+                                    ->where('end_time', '<=', $request->end_time);
+                            })
+                            ->orWhere(function ($q) use ($request) {
+                                $q->where('start_time', '<=', $request->start_time)
+                                    ->where('end_time', '>=', $request->end_time);
+                            });
                     })
-                    ->orWhere(function ($q) use ($request) {
-                        $q->where('end_time', '>=', $request->start_time)
-                            ->where('end_time', '<=', $request->end_time);
+                    ->whereHas('instructor_program_people', function ($query) use ($instructors) {
+                        $query->whereIn('person_id', $instructors);
                     })
-                    ->orWhere(function ($q) use ($request) {
-                        $q->where('start_time', '<=', $request->start_time)
-                            ->where('end_time', '>=', $request->end_time);
-                    });
-                })
-                ->whereHas('instructor_program_people', function ($query) use ($instructors) {
-                    $query->whereIn('person_id', $instructors);
-                })
-                ->where('course_id', $course_id)
-                ->exists();
-            }else{
+                    ->where('course_id', $course_id)
+                    ->exists();
+            } else {
                 $programming = InstructorProgram::where('date', $f)
-                ->where(function ($query) use ($request) {
-                    $query->where(function ($q) use ($request) {
-                        $q->where('start_time', '>=', $request->start_time)
-                            ->where('start_time', '<=', $request->end_time);
+                    ->where(function ($query) use ($request) {
+                        $query->where(function ($q) use ($request) {
+                            $q->where('start_time', '>=', $request->start_time)
+                                ->where('start_time', '<=', $request->end_time);
+                        })
+                            ->orWhere(function ($q) use ($request) {
+                                $q->where('end_time', '>=', $request->start_time)
+                                    ->where('end_time', '<=', $request->end_time);
+                            })
+                            ->orWhere(function ($q) use ($request) {
+                                $q->where('start_time', '<=', $request->start_time)
+                                    ->where('end_time', '>=', $request->end_time);
+                            });
                     })
-                    ->orWhere(function ($q) use ($request) {
-                        $q->where('end_time', '>=', $request->start_time)
-                            ->where('end_time', '<=', $request->end_time);
+                    ->whereHas('instructor_program_people', function ($query) use ($instructors) {
+                        $query->whereIn('person_id', $instructors);
                     })
-                    ->orWhere(function ($q) use ($request) {
-                        $q->where('start_time', '<=', $request->start_time)
-                            ->where('end_time', '>=', $request->end_time);
-                    });
-                })
-                ->whereHas('instructor_program_people', function ($query) use ($instructors) {
-                    $query->whereIn('person_id', $instructors);
-                })
-                ->whereHas('environment_instructor_programs', function ($query) use ($environments) {
-                    $query->whereIn('environment_id', $environments);
-                })
-                ->where('course_id', $course_id)
-                ->exists();
+                    ->whereHas('environment_instructor_programs', function ($query) use ($environments) {
+                        $query->whereIn('environment_id', $environments);
+                    })
+                    ->where('course_id', $course_id)
+                    ->exists();
             }
 
             $holidays = Holiday::where('date', $f)->exists();
 
-            if($programming || $holidays){
+            if ($programming || $holidays) {
                 $fechas_no_registradas[] = $f;
                 continue;
             }
 
-            $quarterlies = Quarterly::with('learning_outcome.competencie','learning_outcome.people.professions')
-            ->where('learning_outcome_id', $request->learning_outcome)
-            ->whereHas('training_project.courses', function ($query) use ($course_id) {
-                $query->where('courses.id', $course_id);
-            })->pluck('id')->first();
+            $quarterlies = Quarterly::with('learning_outcome.competencie', 'learning_outcome.people.professions')
+                ->where('learning_outcome_id', $request->learning_outcome)
+                ->whereHas('training_project.courses', function ($query) use ($course_id) {
+                    $query->where('courses.id', $course_id);
+                })->pluck('id')->first();
 
             try {
                 DB::beginTransaction();
 
-                if($modality == 1 || $c_modality->deschooling == 'Virtual'){
+                if ($modality == 1 || $c_modality->deschooling == 'Virtual') {
                     $p = new InstructorProgram;
                     $p->date = $f;
                     $p->start_time = $request->start_time;
@@ -399,7 +409,7 @@ class ProgrammeController extends Controller
                     $p->modality = 'Medios Tecnologicos';
                     $p->save();
                     $instructor_program_id = $p->id;
-                }else{
+                } else {
                     $p = new InstructorProgram;
                     $p->date = $f;
                     $p->start_time = $request->start_time;
@@ -410,7 +420,7 @@ class ProgrammeController extends Controller
                     $p->modality = 'Presencial';
                     $p->save();
                     $instructor_program_id = $p->id;
-                    
+
                     foreach ($environments as $index => $environment_id) {
                         $environment_instructor_programs = new EnvironmentInstructorProgram;
                         $environment_instructor_programs->instructor_program_id = $instructor_program_id;
@@ -425,7 +435,7 @@ class ProgrammeController extends Controller
                     $instructor_program_people->person_id = $instructor_id;
                     $instructor_program_people->save();
                 }
-                
+
                 foreach ($learning_outcomes as $index => $learning_outcome_id) {
                     $hour = $hours[$index];
                     $instructor_program_outcomes = new InstructorProgramOutcome;
@@ -441,8 +451,8 @@ class ProgrammeController extends Controller
                 // En caso de error, realiza un rollback de la transacción y maneja el error
                 DB::rollBack();
                 $mensaje = 'Ocurrio un error al registrar la programación.';
-                return redirect()->back()->with(['error'=> $mensaje]);
-    
+                return redirect()->back()->with(['error' => $mensaje]);
+
                 \Log::error('Error en el registro: ' . $e->getMessage());
                 \Log::error('Error en el registro: ' . $e->getTraceAsString());
             }
@@ -452,17 +462,18 @@ class ProgrammeController extends Controller
             $hora_inicio = $request->start_time;
             $hora_fin = $request->end_time;
             $mensaje = 'No se pudieron registrar las siguientes fechas: ' . implode(', ', $fechas_no_registradas) . ', ya hay programación para estas fechas entre estas horas: ' . $hora_inicio . ' - ' . $hora_fin . '.';
-            return redirect()->back()->with(['success'=> $mensaje]);
+            return redirect()->back()->with(['success' => $mensaje]);
         } else {
             $mensaje = 'Programación creada con éxito.';
-            return redirect()->back()->with(['success'=> $mensaje]);
+            return redirect()->back()->with(['success' => $mensaje]);
         }
     }
 
-    public function management_programming_search_course(Request $request){
+    public function management_programming_search_course(Request $request)
+    {
         $term = $request->get('code_course');
         $course = Course::where('code', 'LIKE', '%' . $term . '%')
-        ->get();
+            ->get();
 
         foreach ($course as $c) {
             $name = $c->program->name;
@@ -472,15 +483,16 @@ class ProgrammeController extends Controller
         ]);
     }
 
-    public function management_programming_destroy(Request $request){
+    public function management_programming_destroy(Request $request)
+    {
         try {
             $instructor = $request->input('person_id');
             $code_course = $request->input('code_course');
             $quarter = $request->input('quarter');
             $daysSelected = $request->input('days');
-            
-            $year = Carbon::now()->year; 
-            
+
+            $year = Carbon::now()->year;
+
             $daysOfWeek = [
                 'Sunday' => Carbon::SUNDAY,
                 'Monday' => Carbon::MONDAY,
@@ -490,10 +502,10 @@ class ProgrammeController extends Controller
                 'Friday' => Carbon::FRIDAY,
                 'Saturday' => Carbon::SATURDAY,
             ];
-           
-            
+
+
             $dayOfWeek = $daysOfWeek[$daysSelected] ?? null;
-            
+
             // Verificar si el día es válido
             if ($dayOfWeek !== null) {
                 $datesForDay = [];
@@ -503,7 +515,7 @@ class ProgrammeController extends Controller
                 $endDate = Carbon::create($year, 12, 31); // Fin del año
 
                 $period = CarbonPeriod::create($startDate, $endDate);
-                
+
                 foreach ($period as $date) {
                     if ($date->dayOfWeek === $dayOfWeek) {
                         $datesForDay[] = $date->format('Y-m-d'); // Agregar la fecha al array
@@ -511,35 +523,34 @@ class ProgrammeController extends Controller
                 }
 
                 $instructor_program_ids = InstructorProgram::where('quarter_number', $quarter)
-                ->whereIn('date', $datesForDay)
-                ->whereHas('course', function ($query) use ($code_course) {
-                    $query->where('code', $code_course);
-                })
-                ->whereHas('instructor_program_people.person', function ($query) use ($instructor) {
-                    $query->where('id', $instructor);
-                })->pluck('id'); // Obtener solo los IDs
+                    ->whereIn('date', $datesForDay)
+                    ->whereHas('course', function ($query) use ($code_course) {
+                        $query->where('code', $code_course);
+                    })
+                    ->whereHas('instructor_program_people.person', function ($query) use ($instructor) {
+                        $query->where('id', $instructor);
+                    })->pluck('id'); // Obtener solo los IDs
 
-                if($instructor_program_ids->isEmpty()){
-                    return redirect()->back()->with(['error'=> 'No existe programación del trimestre '. $quarter .' para el día '. $daysSelected .'.']);
-                }else{
+                if ($instructor_program_ids->isEmpty()) {
+                    return redirect()->back()->with(['error' => 'No existe programación del trimestre ' . $quarter . ' para el día ' . $daysSelected . '.']);
+                } else {
                     InstructorProgram::whereIn('id', $instructor_program_ids)->delete();
                     $mensaje = 'Programación eliminada con éxito.';
-                    return redirect()->back()->with(['success'=> $mensaje]);
+                    return redirect()->back()->with(['success' => $mensaje]);
                 }
 
                 // Eliminar los registros usando los IDs obtenidos
             } else {
-                return redirect()->back()->with(['error'=> 'Error al eliminar la programación']);
+                return redirect()->back()->with(['error' => 'Error al eliminar la programación']);
             }
-
-
         } catch (\Exception $e) {
             DB::rollBack();
-            return redirect()->back()->with(['error'=> 'Error al eliminar la programación']);
-        }  
+            return redirect()->back()->with(['error' => 'Error al eliminar la programación']);
+        }
     }
 
-    public function management_search_quarter_number(Request $request){
+    public function management_search_quarter_number(Request $request)
+    {
 
         $course_id = $request->input('course_id');
 
@@ -550,7 +561,7 @@ class ProgrammeController extends Controller
 
         // Crear una colección con números desde 1 hasta quarter_number
         $results = collect(range(1, $quarter_number));
-        
+
 
         return response()->json([
             'results' => $results,
@@ -558,7 +569,8 @@ class ProgrammeController extends Controller
         ]);
     }
 
-    public function management_filter(Request $request){
+    public function management_filter(Request $request)
+    {
 
         $filter = $request->input('filter');
 
@@ -637,23 +649,23 @@ class ProgrammeController extends Controller
 
         if ($option == 1) {
 
-            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department','environment_instructor_programs.environment','instructor_program_outcomes.learning_outcome','instructor_program_novelties')->whereHas('instructor_program_people.person', function ($query) use ($filter) {
+            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department', 'environment_instructor_programs.environment', 'instructor_program_outcomes.learning_outcome', 'instructor_program_novelties')->whereHas('instructor_program_people.person', function ($query) use ($filter) {
                 $query->where('id', $filter);
             })
-            ->where('state','=','Programado')
-            ->get();
+                ->where('state', '=', 'Programado')
+                ->get();
         } elseif ($option == 2) {
-            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department', 'environment_instructor_programs.environment','instructor_program_outcomes.learning_outcome')->whereHas('environment_instructor_programs.environment', function ($query) use ($filter) {
+            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department', 'environment_instructor_programs.environment', 'instructor_program_outcomes.learning_outcome')->whereHas('environment_instructor_programs.environment', function ($query) use ($filter) {
                 $query->where('id', $filter);
             })
-            ->where('state','=','Programado')
-            ->get();
+                ->where('state', '=', 'Programado')
+                ->get();
         } else {
-            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department','environment_instructor_programs.environment','instructor_program_outcomes.learning_outcome')->whereHas('course', function ($query) use ($filter) {
+            $programmingEvents = InstructorProgram::with('instructor_program_people.person', 'course.program', 'course.municipality.department', 'environment_instructor_programs.environment', 'instructor_program_outcomes.learning_outcome')->whereHas('course', function ($query) use ($filter) {
                 $query->where('id', $filter);
             })
-            ->where('state','=','Programado')
-            ->get();
+                ->where('state', '=', 'Programado')
+                ->get();
         }
 
 
@@ -661,7 +673,7 @@ class ProgrammeController extends Controller
             foreach ($programmingEvent->instructor_program_people as $asociacion) {
                 $name = $asociacion->person->fullname;
             }
-            
+
             $parts = explode(' ', $name); // Dividir el nombre completo en palabras individuales
             $initials = '';
 
@@ -672,8 +684,6 @@ class ProgrammeController extends Controller
             foreach ($programmingEvent->instructor_program_people as $asociacion) {
                 $asociacion->person->initials = $initials; // Agregar las iniciales al objeto de persona en el evento de programación
             }
-
-            
         }
 
         // Construir una cadena de texto que contenga todas las iniciales
@@ -710,15 +720,18 @@ class ProgrammeController extends Controller
 
         $titlePage = 'Parametros';
         $titleView = 'Parametros';
-        return view('sigac::programming.parameters.index')->with(['titlePage' => $titlePage,
-        'titleView' => $titleView, 
-        'external_activities' => $external_activities, 
-        'professions' => Profession::all(), 
-        'special_programs' => $special_programs]);
+        return view('sigac::programming.parameters.index')->with([
+            'titlePage' => $titlePage,
+            'titleView' => $titleView,
+            'external_activities' => $external_activities,
+            'professions' => Profession::all(),
+            'special_programs' => $special_programs
+        ]);
     }
-  
+
     /* Consultar programas de manera asincrónica*/
-    public function program_search(){
+    public function program_search()
+    {
         $data = Program::with('knowledge_network')->latest()->get();
         $programsselect = $data->map(function ($p) {
             $id = $p->id;
@@ -730,17 +743,17 @@ class ProgrammeController extends Controller
         })->prepend(['id' => null, 'name' => 'Seleccione un programa'])->pluck('name', 'id');
         Session::put('programs', $programsselect);
         return Datatables::of($data)->addIndexColumn()
-                ->addColumn('action', function($row){
-                    $id = $row->id;
-                    $actionBtn = '
-                        <a class="btn btn-primary" href="'.route('sigac.academic_coordination.programming.competence.index', ['program_id' => $id]).'" data-toggle="tooltip" data-placement="top" title="Ver competencias">
-                        <i class="fa-solid fa-outdent"></i>
-                        </a>
-                    ';
-                    return $actionBtn;
-                })
-                ->rawColumns(['action'])
-                ->make(true);
+            ->addColumn('action', function ($row) {
+                $id = $row->id;
+                $actionBtn = '
+                            <a class="btn btn-primary" href="' . route('sigac.academic_coordination.programming.competence.index', ['program_id' => $id]) . '" data-toggle="tooltip" data-placement="top" title="Ver competencias">
+                            <i class="fa-solid fa-outdent"></i>
+                            </a>
+                        ';
+                return $actionBtn;
+            })
+            ->rawColumns(['action'])
+            ->make(true);
     }
 
     public function parameter_competencies($program_id)
@@ -748,15 +761,17 @@ class ProgrammeController extends Controller
         $programs = Session::get('programs');
         $program = Program::findOrFail($program_id);
         $name = $program->name;
-        $competencies = Competencie::where('program_id',$program_id)->get();
+        $competencies = Competencie::where('program_id', $program_id)->get();
         $titlePage = 'Parametros - Competencia';
         $titleView = 'Parametros - Competencia';
-        return view('sigac::programming.parameters.competences.table')->with(['titlePage' => $titlePage,
-        'titleView' => $titleView, 
-        'program_id' => $program_id,
-        'programs' => $programs,
-        'nameprogram' => $name,
-        'competencies' => $competencies]);
+        return view('sigac::programming.parameters.competences.table')->with([
+            'titlePage' => $titlePage,
+            'titleView' => $titleView,
+            'program_id' => $program_id,
+            'programs' => $programs,
+            'nameprogram' => $name,
+            'competencies' => $competencies
+        ]);
     }
 
     public function parameter_learning_outcomes($competencie_id, $program_id)
@@ -772,16 +787,18 @@ class ProgrammeController extends Controller
         })->prepend(['id' => null, 'name' => 'Seleccione una competencia'])->pluck('name', 'id');
         $competencie = Competencie::findOrFail($competencie_id);
         $name_competencia = $competencie->name;
-        $learning_outcomes = LearningOutcome::where('competencie_id',$competencie_id)->get();
+        $learning_outcomes = LearningOutcome::where('competencie_id', $competencie_id)->get();
         $titlePage = 'Parametros - Resultado de aprendizaje';
         $titleView = 'Parametros - Resultado de aprendizaje';
-        return view('sigac::programming.parameters.learning_outcomes.table')->with(['titlePage' => $titlePage,
-        'titleView' => $titleView, 
-        'competencie_id' => $competencie_id,
-        'learning_outcomes' => $learning_outcomes, 
-        'program_id' => $program_id,
-        'namecompetencie' => $name_competencia,
-        'competencies' => $competencies]);
+        return view('sigac::programming.parameters.learning_outcomes.table')->with([
+            'titlePage' => $titlePage,
+            'titleView' => $titleView,
+            'competencie_id' => $competencie_id,
+            'learning_outcomes' => $learning_outcomes,
+            'program_id' => $program_id,
+            'namecompetencie' => $name_competencia,
+            'competencies' => $competencies
+        ]);
     }
 
     // Registrar profesion
@@ -795,13 +812,13 @@ class ProgrammeController extends Controller
 
 
         if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput()->with(['message'=> trans('sigac::profession.An_Error_Occurred_With_Form'), 'typealert'=>'danger']);
+            return redirect()->back()->withErrors($validator)->withInput()->with(['message' => trans('sigac::profession.An_Error_Occurred_With_Form'), 'typealert' => 'danger']);
         }
         // Realizar registro
-        if (Profession::create($request->all())){
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success'=> trans('sigac::profession.The_Profession_Was_Added_Correctly')]);
+        if (Profession::create($request->all())) {
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success' => trans('sigac::profession.The_Profession_Was_Added_Correctly')]);
         } else {
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error'=> trans('sigac::profession.Error_When_Adding_Profession')]);
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error' => trans('sigac::profession.Error_When_Adding_Profession')]);
         }
     }
 
@@ -811,19 +828,20 @@ class ProgrammeController extends Controller
         $p = Profession::find($request->input('id'));
         $p->name = e($request->input('name'));
         $p->level = e($request->input('level'));
-        if($p->save()){
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success'=> trans('sigac::profession.Profession_Edited_Successfully')]);
-        }else{
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error'=> trans('sigac::profession.Error_Editing_Profession')]);
+        if ($p->save()) {
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success' => trans('sigac::profession.Profession_Edited_Successfully')]);
+        } else {
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error' => trans('sigac::profession.Error_Editing_Profession')]);
         }
     }
 
-    public function profession_destroy($id){
+    public function profession_destroy($id)
+    {
         $p = Profession::find($id);
-        if($p->delete()){
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success'=> trans('sigac::profession.Profession_Successfully_Eliminated')]);
-        }else{
-            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error'=> trans('sigac::profession.Error_Deleting_Profession')]);
+        if ($p->delete()) {
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['success' => trans('sigac::profession.Profession_Successfully_Eliminated')]);
+        } else {
+            return redirect(route('sigac.academic_coordination.programming.parameters.index'))->with(['error' => trans('sigac::profession.Error_Deleting_Profession')]);
         }
     }
 
@@ -1023,25 +1041,29 @@ class ProgrammeController extends Controller
         }
     }
 
-    public function learning_outcome_load_create($program_id){
-        $nameprogram = Program::where('id','=',$program_id)->pluck('name')->first();
-		return view('sigac::programming.parameters.learning_outcomes.load')->with(['titlePage' => 'Cargar Resultados de Aprendizaje',
+    public function learning_outcome_load_create($program_id)
+    {
+        $nameprogram = Program::where('id', '=', $program_id)->pluck('name')->first();
+        return view('sigac::programming.parameters.learning_outcomes.load')->with([
+            'titlePage' => 'Cargar Resultados de Aprendizaje',
             'titleView' => 'Cargar Resultados de Aprendizaje',
             'program_id' => $program_id,
             'nameprogram' => $nameprogram
         ]);
-	}
+    }
 
     /* Registrar aprendices a partir de un archivo */
-    public function learning_outcome_load_store(Request $request){
+    public function learning_outcome_load_store(Request $request)
+    {
         ini_set('max_execution_time', 3000); // Ampliar el tiempo máximo de la ejecución del proceso en el servidor
-        $validator = Validator::make($request->all(),
-            ['archivo'  => 'required'],
-            ['archivo.required'  => 'El archivo es requerido.']
+        $validator = Validator::make(
+            $request->all(),
+            ['archivo' => 'required'],
+            ['archivo.required' => 'El archivo es requerido.']
         );
-        if($validator->fails()){
-            return back()->withErrors($validator)->withInput()->with(['message'=>'Ocurrió un error con el formulario.', 'typealert'=>'danger']);
-        }else{
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput()->with(['message' => 'Ocurrió un error con el formulario.', 'typealert' => 'danger']);
+        } else {
             $path = $request->file('archivo'); // Obtener ubicación temporal del archivo en el servidor
             $array = Excel::toArray(new ApprenticeLearningOutcomeImport, $path); // Convertir el contenido del archivo excel en una arreglo de arreglos
             $program_name = $array[0][4][2]; // Obtener la ficha del curso y el nombre del programa en un arreglo
@@ -1058,22 +1080,21 @@ class ProgrammeController extends Controller
 
                 if ($nameprogramselected != $program_name) {
                     DB::rollBack(); // Devolver cambios realizados durante la transacción
-                    return back()->with('error', 'El programa ingresado ('. $program_name.') para el registro de los resultados no coincide con el seleccionado ('.$nameprogramselected.').')->with('typealert', 'danger');
+                    return back()->with('error', 'El programa ingresado (' . $program_name . ') para el registro de los resultados no coincide con el seleccionado (' . $nameprogramselected . ').')->with('typealert', 'danger');
                 }
-               
-                foreach($datas as $data){
+
+                foreach ($datas as $data) {
                     $competencie = explode(" - ", $data[5]);
                     if ($competencie) {
                         if (count($competencie) > 1) {
                             $code_competencie = $competencie[0];
                             // Si hay más de una parte después de dividir por el guión
                             $name_competencia = trim(preg_replace('/^[0-9\s\-\x{2022}\x{0095}\t]+/u', '', $competencie[1])); // Eliminar números y espacios al principio de la cadena
-                            
+
                         } else {
                             // Si no hay un guión, entonces tomar el nombre completo sin modificar
                             $name_competencia = trim($competencie[0]);
                         }
-
                     }
                     $learning_outcome = explode(" - ", $data[6]); // Dividir la cadena por el guión ('-')
                     if ($learning_outcome) {
@@ -1084,7 +1105,7 @@ class ProgrammeController extends Controller
                             // Si no hay un guión, entonces tomar el nombre completo sin modificar
                             $name_learning = trim($learning_outcome[0]);
                         }
-                        $competenciefind = Competencie::where('name', '=', $name_competencia)->where('program_id',$program_id)->first();
+                        $competenciefind = Competencie::where('name', '=', $name_competencia)->where('program_id', $program_id)->first();
 
                         if ($competenciefind) {
                             $competencie_id = $competenciefind->id;
@@ -1092,7 +1113,7 @@ class ProgrammeController extends Controller
                             $competencies = new Competencie;
                             $competencies->program_id = $program_id;
                             $competencies->code = $code_competencie;
-                             // Convierte la frase a minúsculas
+                            // Convierte la frase a minúsculas
                             $name_competencia = mb_strtolower($name_competencia, 'UTF-8');
                             // Capitaliza la primera letra
                             $name_competencia = mb_strtoupper(mb_substr($name_competencia, 0, 1), 'UTF-8') . mb_substr($name_competencia, 1);
@@ -1103,10 +1124,10 @@ class ProgrammeController extends Controller
                             $competencie_id = $competencies->id;
                         }
 
-                        $learning_outcome = LearningOutcome::where('name', '=', $name_learning)->whereHas('competencie', function($query) use ($program_id) {
+                        $learning_outcome = LearningOutcome::where('name', '=', $name_learning)->whereHas('competencie', function ($query) use ($program_id) {
                             $query->where('program_id', $program_id);
                         })->first();
-                        
+
                         if ($learning_outcome) {
                             $learning_outcome_id = $learning_outcome->id;
                         } else {
@@ -1125,46 +1146,48 @@ class ProgrammeController extends Controller
                             $learning_outcomes->hour = 0;
                             $learning_outcomes->save();
                             $count++;
-
                         }
                     }
                 }
 
                 DB::commit();
-                
-                return back()->with('success', 'Archivo excel escaneado coerrectamente. '.$count.' Resultados registrados exitosamente.')->with('typealert', 'success');
+
+                return back()->with('success', 'Archivo excel escaneado coerrectamente. ' . $count . ' Resultados registrados exitosamente.')->with('typealert', 'success');
             } catch (Exception $e) {
                 DB::rollBack(); // Devolver cambios realizados durante la transacción
-                return back()->with('error', 'Ocurrio un error en la importación y/o registro de datos del archivo excel cargado. <hr> <strong>Error: </strong> ('.$e->getMessage().').')->with('typealert', 'danger');
-             }
-
+                return back()->with('error', 'Ocurrio un error en la importación y/o registro de datos del archivo excel cargado. <hr> <strong>Error: </strong> (' . $e->getMessage() . ').')->with('typealert', 'danger');
+            }
         }
     }
 
-    public function program_load_create(){
-	
-		return view('sigac::programming.parameters.competences.load')->with(['titlePage' => 'Cargar Programas',
-        'titleView' => 'Cargar Programas'
+    public function program_load_create()
+    {
+
+        return view('sigac::programming.parameters.competences.load')->with([
+            'titlePage' => 'Cargar Programas',
+            'titleView' => 'Cargar Programas'
         ]);
-	}
+    }
 
 
-    public function program_export(){
-	
-		return Excel::download(new ProgramCourseExport, 'programs.xlsx');
+    public function program_export()
+    {
 
-	}
+        return Excel::download(new ProgramCourseExport, 'programs.xlsx');
+    }
 
     /* Registrar aprendices a partir de un archivo */
-    public function program_load_store(Request $request){
+    public function program_load_store(Request $request)
+    {
         ini_set('max_execution_time', 3000); // Ampliar el tiempo máximo de la ejecución del proceso en el servidor
-        $validator = Validator::make($request->all(),
-            ['archivo'  => 'required'],
-            ['archivo.required'  => 'El archivo es requerido.']
+        $validator = Validator::make(
+            $request->all(),
+            ['archivo' => 'required'],
+            ['archivo.required' => 'El archivo es requerido.']
         );
-        if($validator->fails()){
-            return back()->withErrors($validator)->withInput()->with(['message'=>'Ocurrió un error con el formulario.', 'typealert'=>'danger']);
-        }else{
+        if ($validator->fails()) {
+            return back()->withErrors($validator)->withInput()->with(['message' => 'Ocurrió un error con el formulario.', 'typealert' => 'danger']);
+        } else {
             $path = $request->file('archivo'); // Obtener ubicación temporal del archivo en el servidor
             // Usar el importador personalizado para obtener los datos
             $import = new ProgramImport();
@@ -1173,10 +1196,10 @@ class ProgrammeController extends Controller
             try {
                 $count = 0;
                 // Recorrer datos y relizar registros
-               
+
                 DB::beginTransaction();
 
-                foreach($datas as $data){
+                foreach ($datas as $data) {
                     $sofia_code = $data[0];
                     $version = $data[1];
                     $training_type = $data[3];
@@ -1197,7 +1220,7 @@ class ProgrammeController extends Controller
                     $quarter_number = $file_quarter_number[0];
                     $knowledge_network = KnowledgeNetwork::where('name', '=', $name_knowledge_network)->first();
 
-                    
+
 
                     if ($knowledge_network) {
                         $knowledge_network_id = $knowledge_network->id;
@@ -1268,132 +1291,125 @@ class ProgrammeController extends Controller
                 }
 
                 DB::commit();
-                
-                return back()->with('success', 'Archivo excel escaneado coerrectamente. '.$count.' Programas registrados exitosamente.')->with('typealert', 'success');
+
+                return back()->with('success', 'Archivo excel escaneado coerrectamente. ' . $count . ' Programas registrados exitosamente.')->with('typealert', 'success');
             } catch (Exception $e) {
                 DB::rollBack(); // Devolver cambios realizados durante la transacción
                 \Log::error('Error en el registro: ' . $e->getMessage());
-                return back()->with('error', 'Ocurrio un error en la importación y/o registro de datos del archivo excel cargado. <hr> <strong>Error: </strong> ('.$e->getMessage().').')->with('typealert', 'danger');
-             }
-
+                return back()->with('error', 'Ocurrio un error en la importación y/o registro de datos del archivo excel cargado. <hr> <strong>Error: </strong> (' . $e->getMessage() . ').')->with('typealert', 'danger');
+            }
         }
     }
 
-    public function program_request_table(){
-        $user = Auth::user();
-        $person_id = $user->person->id;
-        foreach($user->roles as $u){
-            $rol = $u->slug;
-        }
-        if ($rol == 'sigac.instructor') {
-            $program_request = ProgramRequest::with('person', 'program', 'special_program', 'program_request_documents')
-            ->where('person_id', $person_id)
-            ->where('state', 'Pendiente')
-            ->orWhere('state', 'Cancelado')
-            ->get();
-        }elseif ($rol == 'sigac.academic_coordinator' || checkRol('superadmin')) {
-            $program_request = ProgramRequest::with('person', 'program', 'special_program', 'program_request_documents')
-            ->where('state', 'Pendiente')
-            ->orWhere('state', 'Cancelado')
-            ->get();
-        }
-        return view('sigac::programming.program_request.table', [
-            'titlePage' => trans('Solicitudes de programa'),
-            'titleView' => trans('Solicitudes de programa'),
-            'program_requests' => $program_request
-        ]);
-    }
-
-    // Solicitar programa
-    public function program_request_index()
+    public function program_request_table(Request $request)
     {
-        $program = Program::orderBy('sofia_code','Asc')->get()->mapWithKeys(function ($program) {
-            return [$program->id => $program->name . ' - ' . $program->sofia_code];
-        });
-        $program_especial = SpecialProgram::orderBy('name','Asc')->get()->mapWithKeys(function ($program_especial) {
-            return [$program_especial->id => $program_especial->name];
-        });
+        $user = auth()->user();
+        if (!$user) abort(403);
 
-        // Obtener tanto empleados como contratistas que sean de los tipos especificados
-        $getInstructor = DB::table('employees')
-                        ->join('employee_types', 'employees.employee_type_id', '=', 'employee_types.id')
-                        ->join('people', 'employees.person_id', '=', 'people.id')
-                        ->where('state', 'Activo')
-                        ->where('employee_types.name', 'Instructor')
-                        ->select('people.id','people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
-                        ->union(
-                            DB::table('contractors')
-                            ->join('employee_types', 'contractors.employee_type_id', '=', 'employee_types.id')
-                            ->join('people', 'contractors.person_id', '=', 'people.id')
-                            ->where('state', 'Activo')
-                            ->where('employee_types.name', 'Instructor')
-                            ->select('people.id','people.first_name', 'people.first_last_name', 'people.second_last_name', 'people.misena_email', 'people.telephone1', 'employee_types.name as employee_type_name')
-                        )->get();
-        $instructors = $getInstructor->map(function ($i) {
-            $id = $i->id;
-            $name = $i->first_name . ' ' . $i->first_last_name . ' ' . $i->second_last_name;
+        $roleRoute = getRoleRouteName(\Illuminate\Support\Facades\Route::currentRouteName()); // instructor | academic_coordination | campesena | support | etc
 
-            return [
-                'id' => $id,
-                'name' => $name
-            ];
-        })->prepend(['id' => null, 'name' => trans('sigac::profession.SelectAnInstructor')])->pluck('name', 'id');
+        $query = ProgramRequest::query()
+            ->with([
+                'person',
+                'program',
+                'special_program',
+                'municipality.department',
+                'village',
+                'dates',      // IMPORTANTE: usa SIEMPRE "dates" (relación)
+                'documents',
+                'area',
+                'budgetItem',
+            ]);
 
-        $country_id = Country::where('name','=','Colombia')->pluck('id');
-        $department_id = Department::where('country_id',$country_id)->pluck('id');
-        $municipalities = Municipality::whereIn('department_id',$department_id)->orderBy('name','Asc')->get()->mapWithKeys(function ($munipality) {
-            return [$munipality->id => $munipality->name];
-        });
+        // Filtro opcional por estado (por query ?state=Pendiente etc)
+        if ($request->filled('state')) {
+            $query->where('state', $request->get('state'));
+        }
 
-        $today = Carbon::today();
+        // Filtro opcional por área (si lo mandas desde la vista)
+        $area_id = (int) $request->input('area_id');
+        if ($area_id > 0) {
+            $query->where('area_id', $area_id);
+        }
 
-        // Obtener los festivos de la tabla 'holidays' que son posteriores a hoy
-        $holidays = Holiday::where('date', '>=', $today)->pluck('date')->toArray();
-
-        // Calcular la fecha mínima (5 días hábiles)
-        $workingDays = 0;
-        $minDate = $today->copy();
-
-        while ($workingDays < 5) {
-            $minDate->addDay();
-
-            if ($minDate->isWeekday() && !in_array($minDate->toDateString(), $holidays)) {
-                $workingDays++;
+        // Instructor: solo sus solicitudes (todas)
+        if (checkRol('sigac.instructor')) {
+            $query->where('person_id', $user->person_id);
+        }
+        // Coordinador académico: solo área 2 (por defecto ver Pendiente si no mandan state)
+        elseif (checkRol('sigac.academic_coordinator') || checkRol('superadmin')) {
+            $query->where('area_id', 2);
+            if (!$request->filled('state')) {
+                $query->where('state', 'Pendiente');
             }
         }
-
-        // Calcular la fecha máxima (30 días hábiles)
-        $workingDays = 0;
-        $maxDate = $minDate->copy();
-
-        while ($workingDays < 30) {
-            $maxDate->addDay();
-
-            if ($maxDate->isWeekday() && !in_array($maxDate->toDateString(), $holidays)) {
-                $workingDays++;
+        // Campesena coordinador: área 1 (si lo estás usando en SIGAC)
+        elseif (checkRol('sigac.campesena')) {
+            $query->where('area_id', 1);
+            if (!$request->filled('state')) {
+                $query->where('state', 'Pendiente');
             }
+        } else {
+            abort(403);
         }
 
-        $user = Auth::user();
-        if($user){
-            $idPersona = $user->person->id;
-            $name = $user->person->first_name . ' ' . $user->person->first_last_name . ' ' . $user->person->second_last_name;
-            
-        }
+        $program_requests = $query->orderByDesc('id')->get();
 
-        return view('sigac::programming.program_request.index', [
-            'titlePage' => trans('Solicitar Programa'),
-            'titleView' => trans('Solicitar Programa'),
-            'program'=>$program,
-            'instructors' => $instructors,
-            'program_especial'=>$program_especial,
-            'municipalities'=>$municipalities,
-            'minDate' => $minDate->toDateString(),
-            'maxDate' => $maxDate->toDateString(),
-            'person' => $name
-        ]);
+        $titlePage = 'Solicitudes de Programación';
+        $titleView = 'Solicitudes de Programación';
+
+        return view('sigac::programming.program_request.table', compact(
+            'program_requests',
+            'titlePage',
+            'titleView',
+            'roleRoute'
+        ));
     }
-    
+
+    public function program_request_document_download($documentId)
+    {
+        try {
+            // Permisos (ajusta a tu necesidad real)
+            if (!function_exists('checkRol') || !(
+                checkRol('gdf.academic_support') ||
+                checkRol('gdf.campesena_support') ||
+                checkRol('sigac.academic_coordinator') ||
+                checkRol('sigac.campesena') ||
+                checkRol('superadmin')
+            )) {
+                abort(403, 'No tienes permisos para descargar este documento.');
+            }
+
+            $document = ProgramRequestDocument::findOrFail($documentId);
+
+            $path = $document->path; // relativo en disco public
+            if (!$path || !Storage::disk('public')->exists($path)) {
+                return back()->with('error', 'El archivo no existe o fue eliminado.');
+            }
+
+            $filename = $document->name ?: basename($path);
+
+            return Storage::disk('public')->download($path, $filename);
+        } catch (\Throwable $e) {
+            Log::error('Error descargando documento individual', [
+                'document_id' => $documentId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return back()->with('error', 'No fue posible descargar el documento.');
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
     // Buscar instructor
     public function program_request_searchperson(Request $request)
     {
@@ -1433,331 +1449,594 @@ class ProgrammeController extends Controller
 
     public function program_request_searchempresa(Request $request)
     {
-        $term = $request->get('q');
-        $empresas = ProgramRequest::where('empresa', 'LIKE', '%' . $term . '%')
-            ->select('empresa as text', 'address') // selecciona solo los campos necesarios
+        $q = trim((string)$request->get('q', ''));
+
+        $items = ProgramRequest::query()
+            ->selectRaw('empresa as text, MAX(address) as address')
+            ->when($q !== '', fn($qq) => $qq->where('empresa', 'like', "%{$q}%"))
+            ->whereNotNull('empresa')
+            ->where('empresa', '!=', '')
+            ->groupBy('empresa')
+            ->orderBy('empresa')
+            ->limit(20)
             ->get();
 
-        return response()->json($empresas);
+        return response()->json($items);
+    }
+
+
+    public function program_request_searchvillages(Request $request)
+    {
+        $municipalityId = (int) $request->query('municipality_id');
+
+        if ($municipalityId <= 0) {
+            return response()->json([], 200);
+        }
+
+        // (Opcional) Validar que el municipio exista
+        $existsMun = DB::table('municipalities')->where('id', $municipalityId)->exists();
+        if (!$existsMun) {
+            return response()->json([], 200);
+        }
+
+        $rows = DB::table('villages')
+            ->select('id', 'name')
+            ->where('municipality_id', $municipalityId)
+            ->orderBy('name')
+            ->limit(2000) // evita respuestas gigantes si un municipio tiene demasiadas
+            ->get();
+
+        return response()->json(
+            $rows->map(fn($r) => ['id' => $r->id, 'text' => (string) $r->name])->values()
+        );
+    }
+
+
+
+
+
+    public function program_request_storevillages(Request $request)
+    {
+        $request->validate([
+            'municipality_id' => 'required|integer|exists:municipalities,id',
+            'name' => 'required|string|max:255'
+        ]);
+
+        $v = Village::firstOrCreate([
+            'municipality_id' => (int) $request->municipality_id,
+            'name' => strtoupper(trim($request->name)),
+        ]);
+
+        return response()->json(['id' => $v->id, 'text' => $v->name]);
     }
 
     public function program_request_searchapplicant(Request $request)
     {
-        $term = $request->get('q');
-        $applicants = ProgramRequest::where('applicant', 'LIKE', '%' . $term . '%')
-            ->select('applicant as text', 'email','telephone') // selecciona solo los campos necesarios
+        $q = trim((string)$request->get('q', ''));
+
+        // AJUSTA nombres de columnas si en tu tabla son applicant_name/applicant_email, etc.
+        // Aquí uso applicant, email, telephone porque en tu método viejo así estaban.
+        $items = ProgramRequest::query()
+            ->select([
+                DB::raw('MAX(applicant) as text'),
+                DB::raw('MIN(email) as email'),
+                DB::raw('MIN(telephone) as telephone'),
+            ])
+            ->when($q !== '', fn($qq) => $qq->where('applicant', 'like', "%{$q}%"))
+            ->whereNotNull('applicant')
+            ->where('applicant', '!=', '')
+            ->groupBy('applicant')
+            ->orderBy('text')
+            ->limit(20)
             ->get();
 
-        return response()->json($applicants);
+        return response()->json($items);
+    }
+
+    public function program_request_searchschedule(Request $request)
+    {
+        $date = $request->input('date');
+        $start_time = $request->input('start_time');
+        $end_time = $request->input('end_time');
+        $instructor = checkRol('sigac.academic_coordinator')
+            ? $request->input('instructor')
+            : Auth::user()->person->id;
+
+        $exists = InstructorProgram::where('date', $date)
+            ->where(function ($q) use ($start_time, $end_time) {
+                $q->where(function ($q2) use ($start_time) {
+                    $q2->where('start_time', '<=', $start_time)
+                        ->where('end_time', '>=', $start_time);
+                })->orWhere(function ($q2) use ($start_time, $end_time) {
+                    $q2->where('start_time', '<=', $end_time)
+                        ->where('end_time', '>=', $end_time);
+                })->orWhere(function ($q2) use ($start_time, $end_time) {
+                    $q2->where('start_time', '>=', $start_time)
+                        ->where('end_time', '<=', $end_time);
+                });
+            })
+            ->whereHas('instructor_program_people', function ($q) use ($instructor) {
+                $q->where('person_id', $instructor);
+            })
+            ->exists();
+
+        return response()->json(['conflict' => $exists]);
     }
 
 
-    // Registrar solicitud del programa
-    public function program_request_store(Request $request)
+
+    public function program_request_document_store(Request $request, $id)
+    {
+        // Permisos (ajusta a tu necesidad real)
+        if (!function_exists('checkRol') || !(
+            checkRol('sigac.instructor') ||
+            checkRol('sigac.academic_coordinator') ||
+            checkRol('sigac.campesena') ||
+            checkRol('gdf.academic_support') ||
+            checkRol('gdf.campesena_support') ||
+            checkRol('superadmin')
+        )) {
+            abort(403);
+        }
+
+        // Validación
+        $request->validate([
+            'documents'   => 'required',
+            'documents.*' => 'file|max:10240', // 10MB
+        ]);
+
+        DB::beginTransaction();
+        try {
+            $pr = ProgramRequest::findOrFail($id);
+
+            $files = $request->file('documents');
+            if (!is_array($files)) $files = [$files];
+
+            if (count($files) === 0) {
+                DB::rollBack();
+                return back()->with('error', 'No se recibieron archivos.');
+            }
+
+            $baseDir = "sigac/program_request/{$pr->id}/documentos";
+
+            foreach ($files as $file) {
+                if (!$file || !$file->isValid()) {
+                    DB::rollBack();
+                    return back()->with('error', 'Uno de los archivos no es válido.');
+                }
+
+                // Nombre seguro
+                $original = $file->getClientOriginalName();
+                $original = preg_replace('/[^\pL\pN\.\-\_\s]/u', '', $original);
+                $original = preg_replace('/\s+/', '_', $original);
+                $filename = time() . '_' . Str::random(6) . '_' . $original;
+
+                // Guardar en disco public -> storage/app/public/...
+                $path = $file->storeAs($baseDir, $filename, 'public');
+
+                ProgramRequestDocument::create([
+                    'program_request_id' => $pr->id,
+                    'name'               => $original,
+                    'path'               => $path, // ej: sigac/program_request/15/documentos/xxx.pdf
+                ]);
+            }
+
+            // (Opcional) devolver a Pendiente si quieres que al adjuntar vuelva a bandeja
+            // $pr->state = 'Pendiente';
+            // $pr->save();
+
+            DB::commit();
+
+            return back()->with('success', 'Se agregaron los archivos correctamente.');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('program_request_document_store error', [
+                'program_request_id' => $id,
+                'message' => $e->getMessage(),
+            ]);
+
+            return back()->with('error', 'Error subiendo documentos: ' . $e->getMessage());
+        }
+    }
+
+
+    public function program_request_download($id)
     {
         try {
-            $instructor = $request->input('instructor');
-            $program_id = $request->input('program_id');
-            $special_program_id = $request->input('program_especial_id');
-            $hours = $request->input('total_hours');
-            $quota = $request->input('quota');
-            $start_date = $request->input('start_date');
-            $end_date = $request->input('end_date');
-            $municipality_id = $request->input('municipality_id');
-            $dates = $request->input('dates');
-            
-            $start_times = $request->input('start_time');
-            $end_times = $request->input('end_time');
-            $observation = $request->input('observation');
-            $empresa = $request->input('empresa');
-            $address = $request->input('address');
-            $applicant = $request->input('applicant');
-            $email = $request->input('email');
-            $telephone = $request->input('telephone');
-
-            DB::beginTransaction();
-
-            $program_request = new ProgramRequest;
-            if(checkRol('sigac.academic_coordinator')){
-                $program_request->person_id = $instructor;
-            }else{
-                $user = Auth::user();
-                if($user){
-                    $idPersona = $user->person->id;
-                    $program_request->person_id = $idPersona;
-                }
+            // Permisos (ajusta a tu necesidad real)
+            if (!function_exists('checkRol') || !(
+                checkRol('gdf.academic_support') ||
+                checkRol('gdf.campesena_support') ||
+                checkRol('sigac.academic_coordinator') ||
+                checkRol('sigac.campesena') ||
+                checkRol('superadmin')
+            )) {
+                abort(403);
             }
-            $program_request->program_id = $program_id;
-            $program_request->special_program_id = $special_program_id;
-            $program_request->municipality_id = $municipality_id;
-            $program_request->hours = $hours;
-            $program_request->start_date = $start_date;
-            $program_request->end_date = $end_date ?? null;
-            $program_request->quotas = $quota;
-            $program_request->address = $address;
-            $program_request->observation = $observation ?? null;
-            $program_request->empresa = $empresa;
-            $program_request->applicant = $applicant;
-            $program_request->email = $email;
-            $program_request->telephone = $telephone;
-            $program_request->state = 'Pendiente';
+
+            $pr = ProgramRequest::with('documents')->findOrFail($id);
+
+            $docs = $pr->documents ?? collect();
+            if ($docs->isEmpty()) {
+                return back()->with('error', 'Esta solicitud no tiene documentos cargados.');
+            }
+
+            // Carpeta temporal dentro de storage/app/tmp
+            $tmpDir = 'tmp';
+            Storage::makeDirectory($tmpDir);
+
+            $zipName = 'program_request_' . $pr->id . '_' . Str::random(8) . '.zip';
+            $zipRelPath = $tmpDir . '/' . $zipName;
+            $zipAbsPath = storage_path('app/' . $zipRelPath);
+
+            $zip = new ZipArchive();
+            if ($zip->open($zipAbsPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                return back()->with('error', 'No se pudo crear el ZIP.');
+            }
+
+            $added = 0;
+
+            foreach ($docs as $doc) {
+                $relPath = $doc->path; // relativo a disk('public')
+                if (!$relPath || !Storage::disk('public')->exists($relPath)) {
+                    continue;
+                }
+
+                $absPath = Storage::disk('public')->path($relPath);
+                if (!is_file($absPath)) {
+                    continue;
+                }
+
+                $nameInZip = $doc->name ?: basename($relPath);
+
+                // Evitar colisiones de nombres dentro del ZIP
+                if ($zip->locateName($nameInZip) !== false) {
+                    $nameInZip = pathinfo($nameInZip, PATHINFO_FILENAME)
+                        . '_' . Str::random(4)
+                        . '.' . pathinfo($nameInZip, PATHINFO_EXTENSION);
+                }
+
+                $zip->addFile($absPath, $nameInZip);
+                $added++;
+            }
+
+            $zip->close();
+
+            if ($added === 0 || !file_exists($zipAbsPath)) {
+                @unlink($zipAbsPath);
+                return back()->with('error', 'No se generó el ZIP (no hay archivos válidos para empaquetar).');
+            }
+
+            return response()->download($zipAbsPath)->deleteFileAfterSend(true);
+        } catch (\Throwable $e) {
+            Log::error('program_request_download zip error', [
+                'program_request_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return back()->with('error', 'No fue posible generar el ZIP: ' . $e->getMessage());
+        }
+    }
+
+
+    public function program_request_approve($id)
+    {
+        $pr = ProgramRequest::findOrFail($id);
+
+        // valida rol + área
+        $this->authorizeCoordinatorArea($pr);
+
+        // valida estado
+        if ($pr->state !== 'Pendiente') {
+            return back()->with('warning', 'Esta solicitud ya no está en estado Pendiente.');
+        }
+
+        $pr->state = 'Preconfirmado';
+        $pr->save();
+
+        return back()->with('success', 'Solicitud aprobada correctamente.');
+    }
+
+
+    // Caracterizar programa
+    public function program_request_confirmation(Request $request, $id)
+    {
+        try {
+            // Confirmar solicitud
+            $program_request = ProgramRequest::find($id);
+            $program_request->state = 'Preconfirmado';
             $program_request->save();
-    
-            $conflicting_dates = [];
-    
-            foreach ($dates as $index => $date) {
-                $start_time = $start_times[$index];
-                $end_time = $end_times[$index];
-    
-                $existing_program = InstructorProgram::where('date', $date)
-                    ->where(function ($query) use ($start_time, $end_time) {
-                        $query->where(function ($query) use ($start_time) {
-                            $query->where('start_time', '<=', $start_time)
-                                  ->where('end_time', '>=', $start_time);
-                        })->orWhere(function ($query) use ($start_time, $end_time) {
-                            $query->where('start_time', '<=', $end_time)
-                                  ->where('end_time', '>=', $end_time);
-                        })->orWhere(function ($query) use ($start_time, $end_time) {
-                            $query->where('start_time', '>=', $start_time)
-                                  ->where('end_time', '<=', $end_time);
-                        });
-                    })
-                    ->whereHas('instructor_program_people', function ($query) use ($instructor) {
-                        $query->where('person_id', $instructor);
-                    })
-                    ->exists();
-    
-                if ($existing_program) {
-                    DB::rollBack();
-                    $conflicting_dates[] = [
-                        'date' => $date,
-                        'start_time' => $start_time,
-                        'end_time' => $end_time,
-                    ];
 
-                    $conflicting_message = ' No se pudieron registrar las siguientes fechas debido a que ya se encuentran programadas: ';
-                    foreach ($conflicting_dates as $conflict) {
-                        $conflicting_message .= "\nFecha: " . $conflict['date'] . ", Hora de inicio: " . $conflict['start_time'] . ", Hora de fin: " . $conflict['end_time'];
-                    }
-
-                    return redirect()->route('sigac.' . getRoleRouteName(Route::currentRouteName()) . '.programming.program_request.index')->with('success', $conflicting_message);
-                    
-                } else {
-                    $program_request_date = new ProgramRequestDate;
-                    $program_request_date->program_request_id = $program_request->id;
-                    $program_request_date->date = $date;
-                    $program_request_date->start_time = $start_time;
-                    $program_request_date->end_time = $end_time;
-                    $program_request_date->save();
-
-                    if ($request->hasFile('documents')) {
-                        $files  = $request->file('documents');
-                        foreach ($files  as $file) {
-                            if ($file->isValid()) {
-                                // Guardar el archivo en el sistema de archivos
-                                $path = $file->store('documents');
-                                $program_request_document = new ProgramRequestDocument;
-                                $program_request_document->program_request_id = $program_request->id;
-                                $program_request_document->name = $file->getClientOriginalName();
-                                $program_request_document->path = $path;
-                                $program_request_document->save();
-                            }else {
-                                return redirect()->back()->with('error', 'Uno de los archivos no es válido.');
-                            }
-                        }
-                    }
-                    
-                }
-            }
-    
             DB::commit();
-    
-            $success_message = 'Solicitud enviada';
-    
-            return redirect()->route('sigac.' . getRoleRouteName(Route::currentRouteName()) . '.programming.program_request.table')->with('success', $success_message);
+            if (Route::is('sigac.campesena.*')) {
+                return redirect()->route('sigac.campesena.programming.program_request.characterization.index')->with('success', 'Solicitud Confirmada');
+            }
+            return redirect()->route('sigac.academic_coordination.programming.program_request.characterization.index')->with('success', 'Solicitud Confirmada');
         } catch (\Exception $e) {
             dd($e);
             DB::rollBack();
             \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor',$e], 500);
+            return response()->json(['error' => 'Error interno del servidor', $e], 500);
         }
     }
-
-    public function program_request_document_store(Request $request, $id)
+    public function program_request_dismiss(Request $request, $id)
     {
-        try{
-            if ($request->hasFile('documents')) {
-                $files  = $request->file('documents');
-                foreach ($files  as $file) {
-                    if ($file->isValid()) {
-                        // Guardar el archivo en el sistema de archivos
-                        $program_request = ProgramRequest::find($id);
-                        $program_request->state = 'Pendiente';
-                        $program_request->save();
+        $request->validate([
+            'observation' => 'required|string|max:5000',
+        ]);
 
-                        $path = $file->store('documents');
-                        $program_request_document = new ProgramRequestDocument;
-                        $program_request_document->program_request_id = $program_request->id;
-                        $program_request_document->name = $file->getClientOriginalName();
-                        $program_request_document->path = $path;
-                        $program_request_document->save();
-                    }else {
-                        return redirect()->back()->with('error', 'Uno de los archivos no es válido.');
-                    }
-                }
-            }    
+        DB::beginTransaction();
+        try {
+            $pr = ProgramRequest::with(['person', 'dates'])->findOrFail($id);
+
+            $pr->observation = $request->observation;
+            $pr->state = 'Desestimado';
+            $pr->save();
 
             DB::commit();
 
-            $success_message = 'Se agregaron los archivos faltantes';
-    
-            return redirect()->route('sigac.' . getRoleRouteName(Route::currentRouteName()) . '.programming.program_request.table')->with('success', $success_message);
-        } catch (\Exception $e) {
+            $this->notifyProgramRequest($pr, 'dismissed', $pr->observation);
+
+            return back()->with('success', 'Solicitud desestimada y notificada por correo.');
+        } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor',$e], 500);
+            return back()->with('error', 'Error al desestimar: ' . $e->getMessage());
         }
     }
-
-    public function program_request_download($id)
+    public function downloadApprenticesTemplate()
     {
-        $documents = ProgramRequestDocument::where('program_request_id', $id)->get();
+        $rel = 'templates/sigac/plantilla_cargue_aprendices.xlsx';
 
-        if ($documents->isEmpty()) {
-            return redirect()->back()->with('error', 'No existen archivos para este programa.');
+        if (!\Storage::exists($rel)) {
+            abort(404, 'No existe la plantilla.');
         }
-    
-        $zip = new ZipArchive;
-        $zipFileName = 'documents.zip';
-        $zipFilePath = storage_path('app/' . $zipFileName);
-    
-        if ($zip->open($zipFilePath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-            foreach ($documents as $document) {
-                $filePath = storage_path('app/' . $document->path);
-    
-                if (file_exists($filePath)) {
-                    $filename = $document->name;
-    
-                    // Evitar nombres duplicados en el ZIP
-                    $i = 1;
-                    while ($zip->locateName($filename) !== false) {
-                        $filename = pathinfo($document->name, PATHINFO_FILENAME) . "_$i." . pathinfo($document->name, PATHINFO_EXTENSION);
-                        $i++;
-                    }
-    
-                    // Añadir el archivo al ZIP
-                    $zip->addFile($filePath, $filename);
-                }
-            }
-    
-            $zip->close();
-    
-            // Descargar el archivo ZIP y eliminarlo después de la descarga
-            return response()->download($zipFilePath)->deleteFileAfterSend(true);
-        } else {
-            return redirect()->back()->with('error', 'No se pudo crear el archivo ZIP.');
-        }
+
+        return \Storage::download($rel, 'plantilla_cargue_aprendices.xlsx');
     }
 
-    // Solicitudes de caracterización
-    public function program_request_characterization()
-    {
-        $program_requests = ProgramRequest::with(['program_request_dates' => function ($query) {
-            $query->orderBy('date', 'asc');
-        }])->orderBy('created_at', 'Asc')->get();
 
-        // Agrupar las fechas por hora de inicio y fin
-        foreach ($program_requests as $program_request) {
-            $groupedDates = $program_request->program_request_dates->groupBy(function ($date) {
-                return $date->start_time . '-' . $date->end_time;
-            });
-            $program_request->groupedDates = $groupedDates;
-        }
-
-        return view('sigac::programming.program_request.characterization', [
-            'titlePage' => trans('Caracterización'),
-            'titleView' => trans('Caracterización'),
-            'program_request'=>$program_requests
-        ]);
-
-
-    }
 
     // Caracterizar programa
     public function program_request_characterization_store(Request $request, $id)
     {
         try {
-            $code_course = $request->input('code_course');
-            $code_empresa = $request->input('code_empresa');
-            $date_inscription = $request->input('date_inscription');
-            $date_characterization = Carbon::now()->toDateString();
             DB::beginTransaction();
-    
-            $program_request = ProgramRequest::with('program_request_dates')->findOrFail($id);
-            $program_request->date_inscription = $date_inscription;
-            $program_request->code_empresa = $code_empresa;
-            $program_request->code_course = $code_course;
-            $program_request->date_characterization = $date_characterization;
-            $program_request->state = 'Confirmado';
-            $program_request->save();
 
-            $course = new Course;
-            $course->code = $program_request->code_course;
-            $course->star_date = $program_request->start_date;
-            $course->end_date = $program_request->end_date;
-            $course->status = 'Activo';
-            $course->program_id = $program_request->program_id;
-            $course->municipality_id = $program_request->municipality_id;
-            $course->save();
+            $program_request = ProgramRequest::with(['program_request_dates', 'person'])->findOrFail($id);
+            $dates = $program_request->program_request_dates ?? collect();
 
-            foreach ($program_request->program_request_dates as $dates) {
-                $instructor_program = new InstructorProgram;
-                $instructor_program->date = $dates->date;
-                $instructor_program->start_time = $dates->start_time;
-                $instructor_program->end_time = $dates->end_time;
-                $instructor_program->course_id = $course->id;
-                $instructor_program->state = 'Programado';
-                $instructor_program->modality = 'Complementaria';
-                $instructor_program->save();
-
-                $instructor_program_people = new InstructorProgramPerson;
-                $instructor_program_people->instructor_program_id = $instructor_program->id;
-                $instructor_program_people->person_id = $program_request->person_id;
-                $instructor_program_people->save();
+            if ($dates->isEmpty()) {
+                DB::rollBack();
+                return back()->with('error', 'No se puede caracterizar: la solicitud no tiene fechas registradas.');
             }
 
+            $startDate = optional($dates->sortBy('date')->first())->date;
+            $endDate   = optional($dates->sortByDesc('date')->first())->date;
+
+            if (!$startDate || !$endDate) {
+                DB::rollBack();
+                return back()->with('error', 'No se pudo determinar fecha inicio/fin desde las fechas registradas.');
+            }
+
+            $code_course  = trim((string) $request->input('code_course'));
+            $code_empresa = trim((string) $request->input('code_empresa'));
+            $date_inscription = $request->input('date_inscription');
+            $date_characterization = Carbon::now()->toDateString();
+
+            if ($code_course === '') {
+                $code_course = 'CUR-' . $program_request->id . '-' . Carbon::now()->format('Ymd') . '-' . Str::upper(Str::random(4));
+            }
+
+            // 1) Persistir datos en solicitud
+            $program_request->date_inscription      = $date_inscription;
+            $program_request->code_empresa          = $code_empresa;
+            $program_request->code_course           = $code_course;
+            $program_request->date_characterization = $date_characterization;
+            $program_request->state = 'Confirmado';
+
+            // Si tu tabla tiene start/end
+            if (\Schema::hasColumn('program_requests', 'start_date')) $program_request->start_date = $startDate;
+            if (\Schema::hasColumn('program_requests', 'end_date'))   $program_request->end_date   = $endDate;
+
+            $program_request->save();
+
+            // 2) Course: NO duplicar. Buscar por ficha (code)
+            $course = Course::where('code', $code_course)->first();
+
+            if (!$course) {
+                $course = new Course();
+                $course->code            = $code_course;
+                $course->start_date      = $startDate;
+                $course->end_date        = $endDate;
+                $course->status          = 'Activo';
+                $course->program_id      = $program_request->program_id;
+                $course->municipality_id = $program_request->municipality_id;
+                $course->save();
+            } else {
+                // (Opcional) mantener coherencia por si el course existía sin datos completos
+                $course->program_id = $course->program_id ?: $program_request->program_id;
+                $course->municipality_id = $course->municipality_id ?: $program_request->municipality_id;
+
+                // Si quieres que SIEMPRE se sincronice:
+                $course->start_date = $startDate;
+                $course->end_date   = $endDate;
+
+                if (empty($course->status)) $course->status = 'Activo';
+                $course->save();
+            }
+
+            // 3) Crear instructor_program por cada fecha, pero sin duplicar (upsert)
+            foreach ($dates as $d) {
+                $ip = InstructorProgram::where('course_id', $course->id)
+                    ->whereDate('date', $d->date)
+                    ->where('start_time', $d->start_time)
+                    ->where('end_time', $d->end_time)
+                    ->first();
+
+                if (!$ip) {
+                    $ip = new InstructorProgram();
+                    $ip->date       = $d->date;
+                    $ip->start_time = $d->start_time;
+                    $ip->end_time   = $d->end_time;
+                    $ip->course_id  = $course->id;
+                    $ip->state      = 'Programado';
+                    $ip->modality   = 'Complementaria';
+                    $ip->save();
+                } else {
+                    // si existía, asegurar estado
+                    if ($ip->state !== 'Programado') {
+                        $ip->state = 'Programado';
+                        $ip->save();
+                    }
+                }
+
+                // Vincular instructor (sin duplicar)
+                InstructorProgramPerson::firstOrCreate([
+                    'instructor_program_id' => $ip->id,
+                    'person_id'             => $program_request->person_id,
+                ]);
+            }
+
+            // 4) Antes del import: contar aprendices actuales del curso
+            $beforeCount = Apprentice::where('course_id', $course->id)->count();
+
+            // 5) Import masivo (si existe documento)
+            $bulkDoc = ProgramRequestDocument::where('program_request_id', $program_request->id)
+                ->where('name', 'like', '%CARGUE_MASIVO%')
+                ->orderByDesc('id')
+                ->first();
+
+            $imported = false;
+            if ($bulkDoc) {
+                $filePath = storage_path('app/' . $bulkDoc->path);
+                if (file_exists($filePath)) {
+                    $this->importApprenticesExcelToCourse($filePath, $course->id);
+                    $imported = true;
+                }
+            }
+
+            // 6) Después del import: contar aprendices
+            $afterCount = Apprentice::where('course_id', $course->id)->count();
+
             DB::commit();
-    
-            return redirect()->route('sigac.support.programming.program_request.characterization.index')->with('success', 'Caracterizacion confirmada');
-        } catch (\Exception $e) {
-            dd($e);
+
+            $msg = $afterCount > 0
+                ? "Caracterización confirmada. Curso {$course->code}: {$afterCount} aprendices registrados."
+                : "Caracterización confirmada. Curso {$course->code}: no tiene aprendices registrados.";
+
+            // Si se importó, agrega delta
+            if ($imported) {
+                $delta = $afterCount - $beforeCount;
+                $msg .= " (Import: " . ($delta >= 0 ? "+{$delta}" : (string)$delta) . ")";
+            }
+
+            return redirect()
+                ->route('sigac.support.programming.program_request.characterization.index')
+                ->with('success', $msg);
+        } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor',$e], 500);
+            return back()->with('error', 'Error en caracterización: ' . $e->getMessage());
         }
     }
 
+
     // Devolver solicitud
-    public function program_request_characterization_devolution(Request $request, $id)
+    public function program_request_characterization(Request $request)
     {
+        $query = ProgramRequest::query()
+            ->with([
+                'person',
+                'program',
+                'special_program',
+                'municipality.department',
+                'village',
+                'program_request_dates',
+                'documents',
+                'area',
+                'budgetItem',
+            ])
+            ->where('state', 'Preconfirmado');
+
+        // Apoyo puede tener uno o ambos roles
+        $areas = [];
+        if (function_exists('checkRol') && checkRol('gdf.campesena_support')) $areas[] = 1;
+        if (function_exists('checkRol') && checkRol('gdf.academic_support'))  $areas[] = 2;
+
+        if (!empty($areas)) {
+            $query->whereIn('area_id', $areas);
+        }
+
+        $program_requests = $query->orderByDesc('id')->get();
+
+        $titlePage = 'Caracterización';
+        $titleView = 'Bandeja de Caracterización (Preconfirmadas)';
+
+        return view('sigac::programming.program_request.characterization_index', compact(
+            'program_requests',
+            'titlePage',
+            'titleView'
+        ));
+    }
+    public function program_request_characterization_dismiss(Request $request, $id)
+    {
+        $request->validate([
+            'observation' => 'required|string|max:5000',
+        ]);
+
         try {
-            $observation = $request->input('observation');
             DB::beginTransaction();
-    
-            $program_request = ProgramRequest::findOrFail($id);
-            $program_request->observation = $observation;
-            $program_request->state = 'Cancelado';
+
+            $program_request = ProgramRequest::with(['person', 'program_request_dates'])->findOrFail($id);
+
+            $program_request->observation = $request->input('observation');
+            $program_request->state = 'Desestimado';
             $program_request->save();
 
             DB::commit();
-    
-            return redirect()->route('sigac.support.programming.program_request.characterization.index')->with('success', 'Solicitud cancelada');
-        } catch (\Exception $e) {
+
+            $this->notifyProgramRequest($program_request, 'dismissed', $program_request->observation);
+
+            return redirect()
+                ->route('sigac.support.programming.program_request.characterization.index')
+                ->with('success', 'Solicitud desestimada y notificada por correo.');
+        } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor',$e], 500);
+            \Log::error('Error desestimando solicitud: ' . $e->getMessage());
+            return back()->with('error', 'Error interno: ' . $e->getMessage());
         }
     }
+
+
+    public function program_request_characterization_devolution(Request $request, $id)
+    {
+        $request->validate([
+            'observation' => 'required|string|max:5000',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $program_request = ProgramRequest::with(['person', 'program_request_dates'])->findOrFail($id);
+
+            $program_request->observation = $request->input('observation');
+            $program_request->state = 'Devuelto'; // <<<<<< CAMBIO
+            $program_request->save();
+
+            DB::commit();
+
+            // Correo a solicitante e instructor
+            $this->notifyProgramRequest($program_request, 'returned', $program_request->observation);
+
+            return redirect()
+                ->route('sigac.support.programming.program_request.characterization.index')
+                ->with('success', 'Solicitud devuelta y notificada por correo.');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            \Log::error('Error devolviendo solicitud: ' . $e->getMessage());
+            return back()->with('error', 'Error interno: ' . $e->getMessage());
+        }
+    }
+
 
     // Novedad de programación
     public function management_programming_novelty(Request $request)
@@ -1771,34 +2050,35 @@ class ProgrammeController extends Controller
             $date = InstructorProgram::where('id', $instructor_program_id)->pluck('date')->first();
 
             DB::beginTransaction();
-                $instructor_program_novelty = new InstructorProgramNovelty;
-                $instructor_program_novelty->instructor_program_id = $instructor_program_id;
-                $instructor_program_novelty->date = $date;
-                $instructor_program_novelty->activity = $activity;
-                $instructor_program_novelty->observation = $observation;
-                $instructor_program_novelty->save();
+            $instructor_program_novelty = new InstructorProgramNovelty;
+            $instructor_program_novelty->instructor_program_id = $instructor_program_id;
+            $instructor_program_novelty->date = $date;
+            $instructor_program_novelty->activity = $activity;
+            $instructor_program_novelty->observation = $observation;
+            $instructor_program_novelty->save();
 
-                if ($option == 'yes') {
-                    $instructor_program = InstructorProgram::findOrFail($instructor_program_id);
-                    $instructor_program->state = 'Cancelado';
-                    $instructor_program->save();
-                }
+            if ($option == 'yes') {
+                $instructor_program = InstructorProgram::findOrFail($instructor_program_id);
+                $instructor_program->state = 'Cancelado';
+                $instructor_program->save();
+            }
             DB::commit();
-    
+
             return redirect()->route('sigac.programming.index')->with('success', 'Novedad Enviada');
         } catch (\Exception $e) {
             DB::rollBack();
             \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor',$e], 500);
+            return response()->json(['error' => 'Error interno del servidor', $e], 500);
         }
     }
 
-    public function external_activities_index(){
+    public function external_activities_index()
+    {
         $external_activities = InstructorProgram::with('instructor_program_people.person', 'course')
-        ->whereNotNull('activity_name')
-        ->where('state', 'Pendiente')
-        ->get()
-        ->groupBy('activity_name');
+            ->whereNotNull('activity_name')
+            ->where('state', 'Pendiente')
+            ->get()
+            ->groupBy('activity_name');
 
         return view('sigac::programming.external_activities.index', [
             'titlePage' => 'Actividades externas',
@@ -1807,10 +2087,11 @@ class ProgrammeController extends Controller
         ]);
     }
 
-    public function external_activities_create(){
+    public function external_activities_create()
+    {
         $courses = Course::where('status', 'Activo')->where('deschooling', 'Presencial')->get();
 
-        $course = $courses->map(function($c){
+        $course = $courses->map(function ($c) {
             $id = $c->id;
             $name = $c->code . ' - ' . $c->program->name;
 
@@ -1827,27 +2108,29 @@ class ProgrammeController extends Controller
         ]);
     }
 
-    public function external_activities_search_course(Request $request){
+    public function external_activities_search_course(Request $request)
+    {
         $name = $request->input('name');
 
         $courses = Course::where('status', 'Activo')
-        ->where('deschooling', 'Presencial')
-        ->whereHas('program', function($query) use ($name){
-            $query->where('name', 'LIKE', '%'. $name . '%');
-        })->get();
+            ->where('deschooling', 'Presencial')
+            ->whereHas('program', function ($query) use ($name) {
+                $query->where('name', 'LIKE', '%' . $name . '%');
+            })->get();
 
         $output = '';
         foreach ($courses as $course) {
             $output .= '<div class="form-check">';
             $output .= '<input type="checkbox" class="form-check-input courses" name="courses[]" value="' . $course->id . '">';
-            $output .= '<label class="form-check-label">'. $course->code . ' - ' . $course->program->name . '</label>';
+            $output .= '<label class="form-check-label">' . $course->code . ' - ' . $course->program->name . '</label>';
             $output .= '</div>';
         }
 
         return response()->json($output);
     }
 
-    public function external_activities_search_person(Request $request){
+    public function external_activities_search_person(Request $request)
+    {
         $term = $request->get('term');
         $persons = Person::whereRaw("CONCAT(first_name, ' ', first_last_name, ' ', second_last_name) LIKE ?", ['%' . $term . '%'])->get();
 
@@ -1862,7 +2145,8 @@ class ProgrammeController extends Controller
         return response()->json($results);
     }
 
-    public function external_activities_store(Request $request){   
+    public function external_activities_store(Request $request)
+    {
         $courses = $request->courses;
         $date = $request->date;
         $start_time = $request->start_time;
@@ -1872,12 +2156,12 @@ class ProgrammeController extends Controller
         $app_id = App::where('name', 'SIGAC')->pluck('id')->first();
 
         $user = Auth::user();
-  
-        $slug  = Role::where('app_id', $app_id)
-        ->whereHas('users', function ($query) use ($user) {
-            $query->where('users.id', $user->id);
-        })->pluck('slug')->first();  
-        
+
+        $slug = Role::where('app_id', $app_id)
+            ->whereHas('users', function ($query) use ($user) {
+                $query->where('users.id', $user->id);
+            })->pluck('slug')->first();
+
         $roles = Str::replaceFirst('sigac.', '', $slug);
 
         $route = getRoleRouteName(Route::currentRouteName());
@@ -1885,8 +2169,8 @@ class ProgrammeController extends Controller
 
             DB::beginTransaction();
 
-            if($route == 'academic_coordination' || $roles == 'academic_coordinator'){
-                foreach($courses as $c){
+            if ($route == 'academic_coordination' || $roles == 'academic_coordinator') {
+                foreach ($courses as $c) {
                     $instructor_program = new InstructorProgram;
                     $instructor_program->course_id = $c;
                     $instructor_program->activity_name = 'Coordinación Académica';
@@ -1902,8 +2186,8 @@ class ProgrammeController extends Controller
                     $instructor_program_people->person_id = $responsible;
                     $instructor_program_people->save();
                 }
-            }else if ($route == 'wellness' || $roles == 'wellness'){
-                foreach($courses as $c){
+            } else if ($route == 'wellness' || $roles == 'wellness') {
+                foreach ($courses as $c) {
                     $instructor_program = new InstructorProgram;
                     $instructor_program->course_id = $c;
                     $instructor_program->activity_name = 'Bienestar';
@@ -1921,16 +2205,17 @@ class ProgrammeController extends Controller
                 }
             }
             DB::commit();
-                
-            
-            return redirect()->route('sigac.'. $route .'.programming.external_activities.index')->with('success', 'Actividad externa registrada exitosamente')->with('typealert', 'success');
-        } catch (\Exception $e){
+
+
+            return redirect()->route('sigac.' . $route . '.programming.external_activities.index')->with('success', 'Actividad externa registrada exitosamente')->with('typealert', 'success');
+        } catch (\Exception $e) {
             DB::rollBack();
             return back()->with(['error' => 'Error interno del servidor.'], 500);
         }
     }
 
-    public function approved_external_activities(Request $request){
+    public function approved_external_activities(Request $request)
+    {
         $ids = $request->input('id'); // Puede ser un único ID o un array de IDs
 
         // Si es un solo ID, convertirlo en un array
@@ -1949,7 +2234,8 @@ class ProgrammeController extends Controller
         return redirect()->route('sigac.academic_coordination.programming.external_activities.index')->with('success', 'Actividad externa aprobada exitosamente')->with('typealert', 'success');
     }
 
-    public function cancel_external_activities(Request $request){
+    public function cancel_external_activities(Request $request)
+    {
         $ids = $request->input('id'); // Puede ser un único ID o un array de IDs
 
         // Si es un solo ID, convertirlo en un array
@@ -1966,5 +2252,1049 @@ class ProgrammeController extends Controller
         }
 
         return redirect()->route('sigac.academic_coordination.programming.external_activities.index')->with('success', 'Actividad externa no aprobada exitosamente')->with('typealert', 'success');
+    }
+
+    /* ============================
+    |  HELPERS (privados)
+    |============================ */
+
+    private function getEffectiveInstructorId(Request $request): int
+    {
+        // Coordinación puede escoger instructor; instructor normal es el logueado
+        if (checkRol('sigac.academic_coordinator') || checkRol('superadmin')) {
+            return (int) $request->input('instructor');
+        }
+        return (int) auth()->user()->person->id;
+    }
+
+    private function instructorIsActive(int $personId): bool
+    {
+        $employee = DB::table('employees')
+            ->join('employee_types', 'employees.employee_type_id', '=', 'employee_types.id')
+            ->where('employees.person_id', $personId)
+            ->where('employees.state', 'Activo')
+            ->where('employee_types.name', 'Instructor')
+            ->exists();
+
+        if ($employee) return true;
+
+        return DB::table('contractors')
+            ->join('employee_types', 'contractors.employee_type_id', '=', 'employee_types.id')
+            ->where('contractors.person_id', $personId)
+            ->where('contractors.state', 'Activo')
+            ->where('employee_types.name', 'Instructor')
+            ->exists();
+    }
+
+    /**
+     * TODO: cuando me pases la BD, aquí conectamos la tabla real.
+     * Por ahora: si es campesena, exigimos que el instructor esté habilitado para ese scope.
+     */
+    private function instructorBelongsToArea(int $personId, string $areaKey): bool
+    {
+        $areaId = $areaKey === 'campesena' ? 1 : 2; // ajusta si cambia
+
+        return \DB::table('person_area_budget_assignments')
+            ->where('person_id', $personId)
+            ->where('area_id', $areaId)
+            ->where('is_active', 1)
+            ->exists();
+    }
+
+
+    private function huilaDepartmentId(): ?int
+    {
+        return Department::where('name', 'Huila')->value('id');
+    }
+
+    private function municipalityIsHuila(int $municipalityId): bool
+    {
+        $huilaId = $this->huilaDepartmentId();
+        if (!$huilaId) return false;
+
+        return Municipality::where('id', $municipalityId)
+            ->where('department_id', $huilaId)
+            ->exists();
+    }
+
+    private function allowedSpecialProgramsFor(string $areaKey, int $personId = null)
+    {
+        // Base por área
+        $q = SpecialProgram::query()->orderBy('name', 'asc');
+
+        if ($areaKey === 'campesena') {
+            $q->where('name', 'CAMPESENA');
+        } else {
+            $q->where('name', '!=', 'CAMPESENA');
+        }
+
+        // Hook: filtrar por instructor cuando exista tabla real (más tarde)
+        // Ejemplo futuro: $q->whereExists(...) o join a tabla instructor_rubros
+
+        return $q->get();
+    }
+
+    /**
+     * Programas permitidos por instructor
+     * Estrategia A: LearningOutcomePerson => Program
+     * Fallback: historial de InstructorProgramPerson => Course => Program
+     */
+    private function allowedProgramsForInstructor(int $personId)
+    {
+        // A) Por resultados de aprendizaje
+        $programIdsA = DB::table('learning_outcome_people as lop')
+            ->join('learning_outcomes as lo', 'lop.learning_outcome_id', '=', 'lo.id')
+            ->join('competencies as c', 'lo.competencie_id', '=', 'c.id')
+            ->where('lop.person_id', $personId)
+            ->distinct()
+            ->pluck('c.program_id');
+
+        if ($programIdsA->isNotEmpty()) {
+            return Program::whereIn('id', $programIdsA)->orderBy('name')->get();
+        }
+
+        // B) Fallback por historial de cursos
+        $programIdsB = DB::table('instructor_program_people as ipp')
+            ->join('instructor_programs as ip', 'ipp.instructor_program_id', '=', 'ip.id')
+            ->join('courses as co', 'ip.course_id', '=', 'co.id')
+            ->where('ipp.person_id', $personId)
+            ->distinct()
+            ->pluck('co.program_id');
+
+        return Program::whereIn('id', $programIdsB)->orderBy('name')->get();
+    }
+
+    /* ============================
+    |  MODIFICAR: program_request_index()
+    |============================ */
+
+
+
+
+
+    /* ============================
+    |  NUEVO: AJAX programas por instructor
+    |============================ */
+    public function program_request_programs_for_instructor(Request $request)
+    {
+        $q = trim((string) $request->get('q', ''));
+        $area = $request->get('area'); // si aplica
+
+        // Ajusta a tu modelo real:
+        $rows = Program::query()
+            ->when($q !== '', fn($qq) => $qq->where('name', 'like', "%{$q}%"))
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'name']);
+
+        return response()->json([
+            'results' => $rows->map(fn($r) => ['id' => $r->id, 'text' => $r->name]),
+        ]);
+    }
+
+    public function program_request_searchmunicipalities(Request $request)
+    {
+        $q = trim((string) $request->get('q', ''));
+
+        $rows = Municipality::query()
+            ->where('department_id', 421)
+            ->when($q !== '', fn($qq) => $qq->where('name', 'like', "%{$q}%"))
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'name']);
+
+        return response()->json([
+            'results' => $rows->map(fn($r) => ['id' => $r->id, 'text' => $r->name]),
+        ]);
+    }
+
+    private function validateScheduleAgainstRange(array $schedule, string $start, string $end): void
+    {
+        $startDate = \Carbon\Carbon::createFromFormat('Y-m-d', $start)->startOfDay();
+        $endDate   = \Carbon\Carbon::createFromFormat('Y-m-d', $end)->endOfDay();
+
+        foreach ($schedule as $i => $row) {
+            $d = \Carbon\Carbon::createFromFormat('Y-m-d', $row['date'])->startOfDay();
+
+            if ($d->lt($startDate) || $d->gt($endDate)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "schedule.$i.date" => "La fecha del horario debe estar entre {$start} y {$end}.",
+                ]);
+            }
+
+            // horas
+            $ini = \Carbon\Carbon::createFromFormat('H:i', $row['start']);
+            $fin = \Carbon\Carbon::createFromFormat('H:i', $row['end']);
+
+            if ($fin->lte($ini)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    "schedule.$i.end" => "La hora fin debe ser mayor que la hora inicio.",
+                ]);
+            }
+        }
+    }
+
+
+
+
+    /* ============================
+    |  NUEVO: AJAX rubros/convenios por instructor + área
+    |============================ */
+    public function program_request_special_programs_for_instructor(Request $request)
+    {
+        $areaKey = $this->areaKeyFromRoute();
+
+        $request->validate([
+            'person_id' => ['required', 'integer', 'exists:people,id'],
+        ]);
+
+        $personId = (int) $request->person_id;
+
+        if (!$this->instructorBelongsToArea($personId, $areaKey)) {
+            return response()->json(['special_programs' => [], 'message' => 'Instructor no habilitado en el área'], 200);
+        }
+
+        $specialPrograms = $this->allowedSpecialProgramsFor($areaKey, $personId)
+            ->map(fn($sp) => ['id' => $sp->id, 'text' => $sp->name])
+            ->values();
+
+        return response()->json(['special_programs' => $specialPrograms]);
+    }
+
+
+
+
+        /* ============================
+    |  MODIFICAR: program_request_store()
+    |============================ */
+
+
+
+    /**
+     * Detecta choques con programación existente del instructor.
+     * Usa instructor_programs + instructor_program_people.
+     */
+    private function instructorHasScheduleConflict(int $personId, string $date, string $startTime, string $endTime): bool
+    {
+        // Solape: NOT (fin <= inicio_existente OR inicio >= fin_existente)
+        // => (start < end_existente) AND (end > start_existente)
+        return DB::table('instructor_program_people as ipp')
+            ->join('instructor_programs as ip', 'ip.id', '=', 'ipp.instructor_program_id')
+            ->whereNull('ipp.deleted_at')
+            ->where('ipp.person_id', $personId)
+            ->whereDate('ip.date', $date)
+            ->where(function ($q) {
+                // Si manejas estados, evita contar cancelados
+                $q->whereNull('ip.state')->orWhere('ip.state', '!=', 'Cancelado');
+            })
+            ->whereRaw("TIME(?) < ip.end_time", [$startTime])
+            ->whereRaw("TIME(?) > ip.start_time", [$endTime])
+            ->exists();
+    }
+
+
+
+    /**
+     * Importa aprendices del Excel y los asocia a una solicitud (NO crea Course definitivo).
+     * Requiere tabla program_request_apprentices (o similar).
+     */
+    private function importApprenticesToProgramRequest($file, int $programRequestId): void
+    {
+        // Requiere maatwebsite/excel
+        $array = \Maatwebsite\Excel\Facades\Excel::toArray([], $file);
+        $rows  = $array[0] ?? [];
+
+        // Ajusta según formato real. Aquí asumo encabezado en primeras filas.
+        // Ejemplo: desde fila 1 si la fila 0 es encabezado.
+        $dataRows = array_slice($rows, 1);
+
+        foreach ($dataRows as $r) {
+            if (empty($r) || empty($r[0])) continue;
+
+            // AJUSTA columnas según tu plantilla:
+            // [0]=tipo_doc, [1]=documento, [2]=nombres, [3]=apellidos, [4]=telefono, [5]=email, [6]=estado
+            $doc = isset($r[1]) ? trim((string)$r[1]) : null;
+            if (!$doc) continue;
+
+            $fullName  = trim(($r[2] ?? '') . ' ' . ($r[3] ?? ''));
+            $email     = strtolower(trim((string)($r[5] ?? '')));
+            $telephone = trim((string)($r[4] ?? ''));
+            $status    = strtolower(trim((string)($r[6] ?? 'activo')));
+
+            // Si existe Person, asociar person_id (opcional)
+            $person = \Modules\SICA\Entities\Person::where('document_number', $doc)->first();
+
+            DB::table('program_request_apprentices')->updateOrInsert(
+                [
+                    'program_request_id' => $programRequestId,
+                    'document_number' => $doc,
+                ],
+                [
+                    'person_id' => $person?->id,
+                    'full_name' => $fullName ?: ($person ? trim($person->first_name . ' ' . $person->first_last_name . ' ' . $person->second_last_name) : null),
+                    'email'     => $email ?: ($person?->personal_email ?? $person?->misena_email ?? $person?->sena_email),
+                    'telephone' => $telephone ?: ($person?->telephone1),
+                    'status'    => $status ?: 'activo',
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+        }
+    }
+
+    private function programsForInstructor(int $personId)
+    {
+        return Program::query()
+            ->select('programs.id', 'programs.name', 'programs.sofia_code')
+            ->join('competencies', 'competencies.program_id', '=', 'programs.id')
+            ->join('learning_outcomes', 'learning_outcomes.competencie_id', '=', 'competencies.id')
+            ->join('learning_outcome_people', 'learning_outcome_people.learning_outcome_id', '=', 'learning_outcomes.id')
+            ->where('learning_outcome_people.person_id', $personId)
+            ->distinct()
+            ->orderBy('programs.sofia_code', 'asc')
+            ->get()
+            ->mapWithKeys(fn($p) => [$p->id => "{$p->name} - {$p->sofia_code}"]);
+    }
+    public function program_request_context(Request $request)
+    {
+        $request->validate([
+            'person_id' => ['required', 'integer', 'exists:people,id'],
+        ]);
+
+        $areaKey = $this->resolveAreaKeyFromRoute();
+        $areaId  = $this->resolveAreaIdOrFail($areaKey);
+
+        $personId = (int) $request->person_id;
+
+        if (!$this->isInstructorVigente($personId)) {
+            return response()->json(['ok' => false, 'message' => 'Instructor no vigente'], 422);
+        }
+
+        if (!$this->instructorHasActiveAreaAssignment($personId, $areaId)) {
+            return response()->json(['ok' => false, 'message' => 'Sin parametrización de área/rubro activa'], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'programs' => $this->programsForInstructor($personId),
+            'rubros'   => $this->budgetItemsForInstructorArea($personId, $areaId),
+        ]);
+    }
+    private function storeProgramRequestFile(Request $request, int $programRequestId, string $inputName, string $label): void
+    {
+        if (!$request->hasFile($inputName)) return;
+
+        $file = $request->file($inputName);
+        if (!$file || !$file->isValid()) return;
+
+        $path = $file->store('documents');
+
+        $doc = new ProgramRequestDocument();
+        $doc->program_request_id = $programRequestId;
+        $doc->name = $label . ' - ' . $file->getClientOriginalName();
+        $doc->path = $path;
+        $doc->save();
+    }
+    private function importApprenticesExcelToCourse(string $filePath, int $courseId): void
+    {
+        $sheet = Excel::toArray([], $filePath);
+        $rows = $sheet[0] ?? [];
+
+        // Ajusta según tu plantilla: en tu import usas datos desde fila 4
+        $dataRows = array_slice($rows, 4);
+
+        $eps = EPS::firstOrCreate(['name' => 'NO REGISTRA']);
+        $population_group = PopulationGroup::firstOrCreate(['name' => 'NINGUNA']);
+        $pension_entity = PensionEntity::firstOrCreate(['name' => 'NO REGISTRA']);
+
+        foreach ($dataRows as $r) {
+            // columnas típicas (según tu TempTablesController de apprentices):
+            // [0]=tipo_doc, [1]=documento, [2]=nombres, [3]=apellidos, [4]=tel, [5]=email, [6]=estado
+            $doc = isset($r[1]) ? trim((string)$r[1]) : '';
+            if ($doc === '') continue;
+
+            $document_type_raw = strtoupper(trim((string)($r[0] ?? 'CC')));
+            $document_type = match ($document_type_raw) {
+                'CC' => 'Cédula de ciudadanía',
+                'TI' => 'Tarjeta de identidad',
+                'CE' => 'Cédula de extranjería',
+                default => 'Cédula de ciudadanía'
+            };
+
+            $names = strtoupper(trim((string)($r[2] ?? '')));
+            $surnames = strtoupper(trim((string)($r[3] ?? '')));
+            $telephone = (string)($r[4] ?? '');
+            $email = strtolower(trim((string)($r[5] ?? '')));
+            $status = strtolower(trim((string)($r[6] ?? 'activo')));
+
+            $surnameParts = preg_split('/\s+/', $surnames) ?: [];
+            $firstLast = $surnameParts[0] ?? '';
+            $secondLast = trim(str_replace($firstLast, '', $surnames));
+
+            // email attribute
+            $attribute = 'personal_email';
+            if (str_contains($email, '@misena')) $attribute = 'misena_email';
+            elseif (str_contains($email, '@sena')) $attribute = 'sena_email';
+
+            $person = Person::firstOrCreate(
+                ['document_number' => (int)$doc],
+                [
+                    'document_type' => $document_type,
+                    'first_name' => $names ?: 'NO REGISTRA',
+                    'first_last_name' => $firstLast ?: 'NO REGISTRA',
+                    'second_last_name' => $secondLast ?: 'NO REGISTRA',
+                    'telephone1' => (int)($telephone ?: 0),
+                    $attribute => $email ?: null,
+                    'eps_id' => $eps->id,
+                    'population_group_id' => $population_group->id,
+                    'pension_entity_id' => $pension_entity->id,
+                ]
+            );
+
+            // si ya existe, actualiza mínimos
+            if ($email && empty($person->{$attribute})) {
+                $person->{$attribute} = $email;
+            }
+            if ($telephone && empty($person->telephone1)) {
+                $person->telephone1 = (int)$telephone;
+            }
+            $person->save();
+
+            Apprentice::firstOrCreate(
+                ['person_id' => $person->id, 'course_id' => $courseId],
+                ['apprentice_status' => $status ?: 'activo']
+            );
+        }
+    }
+
+
+    private function budgetItemsForInstructorArea(int $personId, int $areaId)
+    {
+        $today = Carbon::today()->toDateString();
+
+        return DB::table('person_area_budget_assignments as pa')
+            ->join('budget_items as bi', 'bi.id', '=', 'pa.budget_item_id')
+            ->where('pa.person_id', $personId)
+            ->where('pa.area_id', $areaId)
+            ->where('pa.is_active', 1)
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.start_date')->orWhereDate('pa.start_date', '<=', $today);
+            })
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.end_date')->orWhereDate('pa.end_date', '>=', $today);
+            })
+            ->select([
+                'bi.id',
+                DB::raw("CONCAT(bi.code,' - ',bi.name) as name")
+            ])
+            ->orderBy('bi.name')
+            ->get();
+    }
+    public function program_request_searchmunicipality(Request $request)
+    {
+        $term = trim((string) $request->get('q', ''));
+        $departmentId = 421;
+
+        $rows = Municipality::query()
+            ->where('department_id', $departmentId)
+            ->when($term !== '', function ($q) use ($term) {
+                $q->where('name', 'like', "%{$term}%");
+            })
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'name']);
+
+        return response()->json(
+            $rows->map(fn($m) => ['id' => $m->id, 'text' => $m->name])->values()
+        );
+    }
+    public function program_request_index(Request $request)
+    {
+        $user = Auth::user();
+        if (!$user || !$user->person) abort(403);
+        $personId = (int) $user->person->id;
+
+        // 0) Guardas fuertes: vigencia + áreas
+        $canCreate = true;
+        $blockReason = null;
+
+        if (!$this->isInstructorVigente($personId)) {
+            $canCreate = false;
+            $blockReason = 'Tu usuario no tiene contrato vigente. No puedes realizar solicitudes.';
+        }
+
+        $areaOptions = $this->availableAreasForInstructor($personId);
+        if ($canCreate && empty($areaOptions)) {
+            $canCreate = false;
+            $blockReason = 'No tienes un área asignada. Solicita a Coordinación/Apoyo que te asocien a un área y rubro.';
+        }
+
+        // Si está bloqueado, retornamos vista con colecciones vacías (no revienta) y botón deshabilitado
+        if (!$canCreate) {
+            $titlePage = 'Solicitud de programas';
+            $titleView = 'Solicitud de programas';
+
+            return view('sigac::programming.program_request.index', [
+                'canCreate'            => $canCreate,
+                'blockReason'          => $blockReason,
+                'areaKey'              => null,
+                'areaId'               => null,
+                'areaOptions'          => [],
+                'programs'             => collect(),
+                'specialPrograms'      => collect(),
+                'municipalities'       => collect(),
+                'villageIds'           => collect(),
+                'rubros'               => collect(),
+                'companySuggestions'   => collect(),
+                'applicantSuggestions' => collect(),
+                'titlePage'            => $titlePage,
+                'titleView'            => $titleView,
+            ]);
+        }
+
+        // 1) Resolver área: NUNCA inventar "academic" si el instructor no la tiene
+        $allowedKeys = array_values(array_unique(array_column($areaOptions, 'key')));
+
+        $areaKey = $this->resolveAreaKeyFromRoute();
+        if (!in_array($areaKey, $allowedKeys, true)) {
+            $areaKey = $allowedKeys[0];
+        }
+
+        if ($request->filled('area')) {
+            $candidate = (string) $request->get('area');
+            if (in_array($candidate, $allowedKeys, true)) {
+                $areaKey = $candidate;
+            }
+        }
+
+        $areaId = $this->resolveAreaIdOrFail($areaKey);
+
+        // 2) Datos para la vista (solo si puede crear)
+        $programs = DB::table('programs')
+            ->select('id', 'name')
+            ->orderBy('name')
+            ->get();
+
+        $specialPrograms = DB::table('special_programs')
+            ->select('id', 'name')
+            ->orderBy('name')
+            ->get();
+
+        // Municipios del depto 421
+        $DEPT_ID = 421;
+        $municipalities = DB::table('municipalities')
+            ->select('id', 'name')
+            ->where('department_id', $DEPT_ID)
+            ->orderBy('name')
+            ->get();
+
+        // (Opcional) precarga (si quieres mantener tu debug)
+        $villageIds = DB::table('villages')
+            ->select('id', 'name', 'municipality_id')
+            ->whereIn('municipality_id', $municipalities->pluck('id'))
+            ->orderBy('name')
+            ->get();
+
+        // Rubros permitidos para el instructor en esa área
+        $rubros = DB::table('person_area_budget_assignments as paba')
+            ->join('area_budget_items as abi', function ($j) {
+                $j->on('abi.area_id', '=', 'paba.area_id')
+                    ->on('abi.budget_item_id', '=', 'paba.budget_item_id');
+            })
+            ->join('budget_items as bi', 'bi.id', '=', 'paba.budget_item_id')
+            ->where('paba.person_id', $personId)
+            ->where('paba.is_active', 1)
+            ->where('paba.area_id', $areaId)
+            ->where('abi.active', 1)
+            ->select('bi.id', DB::raw("COALESCE(bi.code,'') as code"), 'bi.name')
+            ->orderBy('bi.name')
+            ->distinct()
+            ->get();
+
+        $companySuggestions = DB::table('companies')
+            ->select('id', 'name', 'nit')
+            ->orderBy('name')
+            ->limit(500)
+            ->get();
+
+        $applicantSuggestions = DB::table('program_requests')
+            ->whereNotNull('applicant')->where('applicant', '!=', '')
+            ->orderByDesc('id')
+            ->limit(200)
+            ->pluck('applicant')
+            ->unique()
+            ->values();
+
+        $titlePage = 'Solicitud de programas';
+        $titleView = 'Solicitud de programas';
+
+        return view('sigac::programming.program_request.index', compact(
+            'canCreate',
+            'blockReason',
+            'areaKey',
+            'areaId',
+            'areaOptions',
+            'programs',
+            'specialPrograms',
+            'municipalities',
+            'villageIds',
+            'rubros',
+            'companySuggestions',
+            'applicantSuggestions',
+            'titlePage',
+            'titleView'
+        ));
+    }
+
+    /* ============================================================
+     | STORE (guardar) - guardas obligatorias
+     * ============================================================ */
+    public function program_request_store(Request $request)
+    {
+        $user = Auth::user();
+        if (!$user || !$user->person) abort(403);
+        $personId = (int) $user->person->id;
+
+        // Guardas fuertes
+        if (!$this->isInstructorVigente($personId)) {
+            return back()->withInput()->with('error', 'No tienes contrato vigente. No puedes crear solicitudes.');
+        }
+
+        $areaOptions = $this->availableAreasForInstructor($personId);
+        if (empty($areaOptions)) {
+            return back()->withInput()->with('error', 'No tienes un área asignada. No puedes crear solicitudes.');
+        }
+
+        // Resolver área SOLO desde opciones permitidas
+        $allowedKeys = array_values(array_unique(array_column($areaOptions, 'key')));
+
+        $areaKey = $this->resolveAreaKeyFromRoute();
+        if (!in_array($areaKey, $allowedKeys, true)) {
+            $areaKey = $allowedKeys[0];
+        }
+
+        if ($request->filled('area')) {
+            $candidate = (string) $request->get('area');
+            if (in_array($candidate, $allowedKeys, true)) {
+                $areaKey = $candidate;
+            }
+        }
+
+        $areaId = $this->resolveAreaIdOrFail($areaKey);
+
+        // Validación
+        $validated = $request->validate([
+            'program_id'          => 'required|integer|exists:programs,id',
+            'special_program_id'  => 'required|integer|exists:special_programs,id',
+            'budget_item_id'      => 'required|integer|exists:budget_items,id',
+
+            'hours'               => 'required|integer|min:1',
+            'quotas'              => 'required|integer|min:1',
+
+            'start_date'          => 'required|date',
+            'end_date'            => 'nullable|date|after_or_equal:start_date',
+
+            'municipality_id'     => 'required|integer|exists:municipalities,id',
+            'place_type'          => 'required|in:municipio,vereda',
+            'village_id'          => 'nullable|integer|exists:villages,id',
+
+            'company_id'          => 'nullable|integer|exists:companies,id',
+            'company_name'        => 'nullable|string|max:255',
+
+            'address'             => 'nullable|string|max:255',
+            'observation'         => 'nullable|string|max:5000',
+
+            'applicant'           => 'nullable|string|max:255',
+            'email'               => 'nullable|email|max:255',
+            'telephone'           => 'nullable|string|max:50',
+
+            'cedula_pdf'          => 'nullable|file|mimes:pdf|max:10240',
+            'carta_pdf'           => 'nullable|file|mimes:pdf|max:10240',
+            'bulk_excel'          => 'nullable|file|mimes:xls,xlsx|max:10240',
+
+            'dates'               => 'required|array|min:1',
+            'dates.*'             => 'required|date',
+            'start_time'          => 'required|array|min:1',
+            'start_time.*'        => 'required|date_format:H:i',
+            'end_time'            => 'required|array|min:1',
+            'end_time.*'          => 'required|date_format:H:i',
+        ]);
+
+        // 1) village_id
+        $villageId = null;
+        if ($validated['place_type'] === 'vereda') {
+            $villageId = (int) ($validated['village_id'] ?? 0);
+
+            if (!$villageId) {
+                return back()->withInput()->with('error', 'Si el destino es vereda, debes escoger una vereda.');
+            }
+
+            $okVillage = DB::table('villages')
+                ->where('id', $villageId)
+                ->where('municipality_id', (int) $validated['municipality_id'])
+                ->exists();
+
+            if (!$okVillage) {
+                return back()->withInput()->with('error', 'La vereda seleccionada no pertenece al municipio seleccionado.');
+            }
+        }
+
+        // 2) rango fechas / horario
+        $sd = Carbon::parse($validated['start_date'])->startOfDay();
+        $ed = Carbon::parse($validated['end_date'] ?? $validated['start_date'])->endOfDay();
+
+        $dates  = $validated['dates'];
+        $starts = $validated['start_time'];
+        $ends   = $validated['end_time'];
+
+        if (count($dates) !== count($starts) || count($dates) !== count($ends)) {
+            return back()->withInput()->with('error', 'Horario inválido: fechas y horas no coinciden en cantidad.');
+        }
+
+        foreach ($dates as $i => $d) {
+            $day = Carbon::parse($d)->startOfDay();
+
+            if ($day->lt($sd) || $day->gt($ed)) {
+                return back()->withInput()->with('error', "La fecha {$d} está por fuera del rango Inicio/Fin.");
+            }
+
+            $st = $starts[$i];
+            $et = $ends[$i];
+
+            if ($et <= $st) {
+                return back()->withInput()->with('error', "En {$d}: la hora fin debe ser mayor que la hora inicio.");
+            }
+
+            $conflict = DB::table('instructor_program_people as ipp')
+                ->join('instructor_programs as ip', 'ip.id', '=', 'ipp.instructor_program_id')
+                ->where('ipp.person_id', $personId)
+                ->whereDate('ip.date', $d)
+                ->where(function ($q) {
+                    $q->whereNull('ip.state')
+                        ->orWhereIn('ip.state', ['Programado', 'Pendiente']);
+                })
+                ->where(function ($q) use ($st, $et) {
+                    $q->whereRaw('? < ip.end_time AND ? > ip.start_time', [$st, $et]);
+                })
+                ->exists();
+
+            if ($conflict) {
+                return back()->withInput()->with('error', "Choque de horario el {$d} ({$st}-{$et}) con la programación del instructor.");
+            }
+        }
+
+        // 3) company_id
+        $companyId = !empty($validated['company_id']) ? (int) $validated['company_id'] : null;
+        $companyName = trim((string) ($validated['company_name'] ?? ''));
+
+        if (!$companyId && $companyName !== '') {
+            $existing = DB::table('companies')
+                ->whereRaw('LOWER(name) = ?', [mb_strtolower($companyName)])
+                ->value('id');
+
+            $companyId = $existing ? (int) $existing : (int) DB::table('companies')->insertGetId([
+                'name'       => $companyName,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        DB::beginTransaction();
+        try {
+            $prId = DB::table('program_requests')->insertGetId([
+                'person_id'          => $personId,
+                'area_id'            => $areaId,
+                'budget_item_id'     => (int) $validated['budget_item_id'],
+                'program_id'         => (int) $validated['program_id'],
+                'special_program_id' => (int) $validated['special_program_id'],
+                'company_id'         => $companyId,
+
+                'municipality_id'    => (int) $validated['municipality_id'],
+                'village_id'         => $villageId,
+
+                'hours'              => (int) $validated['hours'],
+                'start_date'         => $validated['start_date'],
+                'end_date'           => $validated['end_date'] ?? null,
+                'quotas'             => (int) $validated['quotas'],
+
+                'address'            => $validated['address'] ?? null,
+                'observation'        => $validated['observation'] ?? null,
+
+                'applicant'          => $validated['applicant'] ?? null,
+                'email'              => isset($validated['email']) ? strtolower(trim($validated['email'])) : null,
+                'telephone'          => $validated['telephone'] ?? null,
+
+                'state'              => 'Pendiente',
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ]);
+
+            foreach ($validated['dates'] as $i => $date) {
+                DB::table('program_request_dates')->insert([
+                    'program_request_id' => $prId,
+                    'date'       => $date,
+                    'start_time' => $validated['start_time'][$i],
+                    'end_time'   => $validated['end_time'][$i],
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+
+            DB::commit();
+
+            $routeRole = getRoleRouteName(Route::currentRouteName());
+
+            return redirect()
+                ->route("sigac.{$routeRole}.programming.program_request.table")
+                ->with('success', 'Solicitud creada correctamente.');
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return back()->withInput()->with('error', 'Error guardando la solicitud: ' . $e->getMessage());
+        }
+    }
+
+    /* ============================================================
+     | PRIVADOS (corregidos)
+     * ============================================================ */
+
+    private function availableAreasForInstructor(int $personId): array
+    {
+        // Toma áreas por asignación activa y además filtra por rango de fechas (vigencia de la asignación)
+        $areaIds = DB::table('person_area_budget_assignments')
+            ->where('person_id', $personId)
+            ->where('is_active', 1)
+            ->distinct()
+            ->pluck('area_id')
+            ->map(fn($id) => (int) $id)
+            ->values()
+            ->all();
+
+        $opts = [];
+        foreach ($areaIds as $id) {
+            if (!$this->instructorHasActiveAreaAssignment($personId, $id)) continue;
+
+            $name = (string) DB::table('areas')->where('id', $id)->value('name');
+            $key  = (stripos($name, 'CAMPESENA') !== false) ? 'campesena' : 'academic';
+
+            $opts[] = ['id' => $id, 'key' => $key];
+        }
+
+        // quitar duplicados por key (por si hay múltiples áreas que terminan en academic)
+        $byKey = [];
+        foreach ($opts as $o) $byKey[$o['key']] = $o;
+        return array_values($byKey);
+    }
+
+    private function resolveAreaKeyFromRoute(): string
+    {
+        return Route::is('sigac.campesena.*') ? 'campesena' : 'academic';
+    }
+
+    private function resolveAreaIdOrFail(string $areaKey): int
+    {
+        $areaName = $areaKey === 'campesena' ? 'CAMPESENA' : 'COORDINACIÓN ACADÉMICA';
+        $areaId = DB::table('areas')->where('name', $areaName)->value('id');
+        if (!$areaId) abort(403, "No existe el área parametrizada: {$areaName} (tabla areas).");
+        return (int) $areaId;
+    }
+
+    private function isInstructorVigente(int $personId): bool
+    {
+        $today = Carbon::today()->toDateString();
+
+        $isEmployee = Employee::query()
+            ->where('person_id', $personId)
+            ->where('state', 'Activo')
+            ->exists();
+
+        $isContractor = Contractor::query()
+            ->where('person_id', $personId)
+            ->where('state', 'Activo')
+            ->whereDate('contract_start_date', '<=', $today)
+            ->whereDate('contract_end_date', '>=', $today)
+            ->exists();
+
+        return $isEmployee || $isContractor;
+    }
+
+    private function instructorHasActiveAreaAssignment(int $personId, int $areaId): bool
+    {
+        $today = Carbon::today()->toDateString();
+
+        return DB::table('person_area_budget_assignments as pa')
+            ->where('pa.person_id', $personId)
+            ->where('pa.area_id', $areaId)
+            ->where('pa.is_active', 1)
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.start_date')->orWhereDate('pa.start_date', '<=', $today);
+            })
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.end_date')->orWhereDate('pa.end_date', '>=', $today);
+            })
+            ->exists();
+    }
+    public function program_request_dates_json($id)
+    {
+        $pr = ProgramRequest::with('dates')->findOrFail($id);
+
+        $dates = $pr->dates->map(function ($d) {
+            return [
+                'date'       => (string) $d->date,
+                'start_time' => (string) $d->start_time,
+                'end_time'   => (string) $d->end_time,
+            ];
+        })->values();
+
+        return response()->json([
+            'ok'    => true,
+            'id'    => $pr->id,
+            'dates' => $dates,
+        ]);
+    }
+
+
+
+    private function allowedAreaIdsForProgramRequestInbox(): array
+    {
+        $ids = [];
+
+        // Coordinadores SIGAC (aval)
+        if (checkRol('sigac.campesena')) {
+            $ids[] = 1;
+        }
+        if (checkRol('sigac.academic_coordinator')) {
+            $ids[] = 2;
+        }
+
+        // Apoyo (caracterización) basado en roles GDF
+        if (checkRol('gdf.campesena_support')) {
+            $ids[] = 1;
+        }
+        if (checkRol('gdf.academic_support')) {
+            $ids[] = 2;
+        }
+
+        // Unificar
+        $ids = array_values(array_unique($ids));
+
+        return $ids;
+    }
+
+    private function authorizeCoordinatorArea(\Modules\SIGAC\Entities\ProgramRequest $pr): void
+    {
+        // Coordinación Académica solo área 2
+        if (checkRol('sigac.academic_coordinator') && (int)$pr->area_id !== 2) {
+            abort(403, 'No puedes aprobar solicitudes de otra área.');
+        }
+
+        // Campesena solo área 1
+        if (checkRol('sigac.campesena') && (int)$pr->area_id !== 1) {
+            abort(403, 'No puedes aprobar solicitudes de otra área.');
+        }
+
+        // Si es superadmin, lo dejamos pasar
+        if (checkRol('superadmin')) {
+            return;
+        }
+
+        // Si no es ninguno, no aprueba
+        if (!checkRol('sigac.academic_coordinator') && !checkRol('sigac.campesena')) {
+            abort(403);
+        }
+    }
+    private function getInstructorAreaOptions(int $personId): array
+    {
+        $areaIds = \DB::table('person_area_budget_assignments')
+            ->where('person_id', $personId)
+            ->where('is_active', 1)
+            ->distinct()
+            ->pluck('area_id')
+            ->map(fn($id) => (int)$id)
+            ->values()
+            ->all();
+
+        $opts = [];
+        foreach ($areaIds as $id) {
+            $opts[] = [
+                'id'  => $id,
+                'key' => ($id === 1) ? 'campesena' : 'academic',
+            ];
+        }
+        return $opts;
+    }
+    private function notifyProgramRequest(ProgramRequest $pr, string $type, ?string $note = null, array $extra = []): void
+    {
+        // Instructor
+        $instructorEmail =
+            $pr->person?->misena_email
+            ?? $pr->person?->sena_email
+            ?? $pr->person?->personal_email;
+
+        // Solicitante (del formulario)
+        $applicantEmail = $pr->email ? strtolower(trim($pr->email)) : null;
+
+        // Login link (ajústalo si tienes ruta específica)
+        $loginUrl = url('/login');
+
+        // Fechas para incluir en correo (si existen)
+        $dates = [];
+        if (method_exists($pr, 'dates') && $pr->relationLoaded('dates')) {
+            $dates = $pr->dates->map(fn($d) => [
+                'date' => (string)$d->date,
+                'start_time' => (string)$d->start_time,
+                'end_time' => (string)$d->end_time,
+            ])->values()->all();
+        }
+
+        $payload = array_merge([
+            'note' => $note,
+            'login_url' => $loginUrl,
+            'dates' => $dates,
+        ], $extra);
+
+        // CC/BCC a correos de aprendices (opcional)
+        // Recomendación: BCC si son muchos.
+        $bcc = $extra['bcc'] ?? [];
+
+        // Enviar al instructor
+        if ($instructorEmail && filter_var($instructorEmail, FILTER_VALIDATE_EMAIL)) {
+            Mail::to($instructorEmail)
+                ->bcc($bcc)
+                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
+        }
+
+        // Enviar al solicitante
+        if ($applicantEmail && filter_var($applicantEmail, FILTER_VALIDATE_EMAIL)) {
+            Mail::to($applicantEmail)
+                ->bcc($bcc)
+                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
+        }
+    }
+    public function course_apprentices_count(Request $request)
+    {
+        $code = trim((string) $request->get('code_course', ''));
+        if ($code === '') {
+            return response()->json(['ok' => false, 'message' => 'code_course requerido'], 422);
+        }
+
+        $course = Course::where('code', $code)->first();
+        if (!$course) {
+            return response()->json([
+                'ok' => true,
+                'exists' => false,
+                'message' => 'La ficha no existe como Course.',
+                'count' => 0,
+            ]);
+        }
+
+        $count = Apprentice::where('course_id', $course->id)->count();
+
+        return response()->json([
+            'ok' => true,
+            'exists' => true,
+            'course_id' => $course->id,
+            'count' => $count,
+            'message' => $count > 0 ? "Tiene {$count} aprendices registrados." : "No tiene aprendices registrados.",
+        ]);
     }
 }
