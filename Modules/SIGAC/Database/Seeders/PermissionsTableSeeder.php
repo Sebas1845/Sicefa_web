@@ -2000,7 +2000,7 @@ $permissions_wellness[] = $permission->id;
 
 // 🔹 COORDINACIÓN ACADÉMICA
 $permission = Permission::updateOrCreate(
-    ['slug' => 'sigac.coordinador.PermissionValidation.index'],
+    ['slug' => 'sigac.academic_coordination.PermissionValidation.index'],
     [
         'name' => 'Ver todas las solicitudes (Coordinador Académico)',
         'description' => 'Permite al Coordinador Académico visualizar todas las solicitudes de permisos.',

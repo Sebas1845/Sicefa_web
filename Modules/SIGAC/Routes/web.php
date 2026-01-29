@@ -6,6 +6,36 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 
+
+
+//
+// Mostrar formulario (GET)
+//
+Route::get('/login-email', function () {
+    return view('Auth_temporal_solo_correo.login-email');
+})->name('login.email');
+
+//
+// Procesar login con email (POST)
+//
+Route::post('/login-email', function () {
+    request()->validate([
+        'email' => 'required|email'
+    ]);
+
+    $user = User::where('email', request('email'))->first();
+
+    if (!$user) {
+        return redirect()->back()->withErrors([
+            'email' => 'Este correo no está registrado.'
+        ]);
+    }
+
+    Auth::login($user);
+
+    return redirect('/home'); // cámbialo si tu home es otra ruta
+})->name('login.email.post');
+
 Route::middleware(['lang'])->group(function () { //Middleware que permite la internacionalizacion
 
     Route::prefix('sigac')->group(function () {  // agrega el prefijo en la url (sicefa.test/sigac/...)
@@ -404,7 +434,7 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
 
     // COORDINADOR
     Route::prefix('coordinador/apprentice_permissions')->group(function () {
-        Route::get('index', 'index')->name('sigac.coordinador.PermissionValidation.index');
+        Route::get('index', 'index')->name('sigac.academic_coordination.PermissionValidation.index');
         Route::post('post', 'store')->name('sigac.coordinador.PermissionValidation.store');
         Route::post('cancel', 'cancel')->name('sigac.coordinador.PermissionValidation.cancel');
         Route::get('academicCoordinationValidationHistory', 'academicCoordinationValidationHistory')->name('sigac.academic_coordination.PermissionValidation.academicCoordinationValidationHistory');

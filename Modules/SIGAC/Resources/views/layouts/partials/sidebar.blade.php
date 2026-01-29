@@ -418,7 +418,7 @@
                                 </a>
                                 <ul class="nav nav-treeview items">
                                     <li class="nav-item">
-                                        <a href="{{ route('sigac.coordinador.PermissionValidation.index') }}"
+                                        <a href="{{ route('sigac.academic_coordination.PermissionValidation.index') }}"
                                             class="nav-link">
                                             <i class="nav-icon fas fa-file-invoice"></i>
                                             <p>Solicitud</p>
@@ -448,7 +448,7 @@
                                     <a href="{{ route('sigac.academic_coordination.attendancesrecord.view_edit_page') }}"
                                         class="nav-link">
                                         <i class="nav-icon fas fa-pen"></i>
-                                        <p>Registrar Asistencia</p>
+                                        <p>Editar Asistencias</p>
                                     </a>
                                 </li>
                             </ul>

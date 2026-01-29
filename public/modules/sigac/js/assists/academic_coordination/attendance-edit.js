@@ -36,6 +36,10 @@
     // Modal Observación (solo ver)
     const obsModalBody = document.getElementById('obsModalBody');
 
+    // Compat Bootstrap 4/5
+    const hasBS5 = !!(window.bootstrap && bootstrap.Modal);
+    const hasJQ = !!(window.$ && $.fn);
+
     function showObsModal() {
         if (hasBS5) {
             const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('obsModal'));
@@ -56,26 +60,36 @@
 
     const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const filterButtons = document.querySelectorAll('.filter-btn');
-    // ===== Persistencia (para NO perder instructor/fecha al recargar) =====
-    const STATE_KEY = 'sigac_ca_attendance_state_v1';
+
+    // ===== Persistencia SOLO para RECARGA (reload) =====
+    const STATE_KEY = 'sigac_ca_attendance_state_reload_only_v1';
 
     function saveState(partial) {
-        const current = JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+        const current = JSON.parse(sessionStorage.getItem(STATE_KEY) || '{}');
         const next = Object.assign({}, current, partial);
-        localStorage.setItem(STATE_KEY, JSON.stringify(next));
+        sessionStorage.setItem(STATE_KEY, JSON.stringify(next));
     }
 
     function loadState() {
         try {
-            return JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+            return JSON.parse(sessionStorage.getItem(STATE_KEY) || '{}');
         } catch (e) {
             return {};
         }
     }
 
-    // Compat Bootstrap 4/5
-    const hasBS5 = !!(window.bootstrap && bootstrap.Modal);
-    const hasJQ = !!(window.$ && $.fn);
+    function getNavType() {
+        try {
+            const nav = performance.getEntriesByType && performance.getEntriesByType('navigation');
+            if (nav && nav[0] && nav[0].type) return nav[0].type; // 'navigate' | 'reload' | 'back_forward' | 'prerender'
+        } catch (e) { }
+        // fallback legacy
+        if (performance && performance.navigation) {
+            if (performance.navigation.type === 1) return 'reload';
+            if (performance.navigation.type === 2) return 'back_forward';
+        }
+        return 'navigate';
+    }
 
     function showModal() {
         if (hasBS5) {
@@ -127,6 +141,7 @@
     let t = null;
     let currentRange = null; // franja actual que llega del backend
     let editingOriginalTime = null; // hora original del registro al abrir modal
+
     // Fecha/hora hoy y max hoy
     function pad(n) {
         return String(n).padStart(2, '0');
@@ -138,26 +153,39 @@
             `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
         dateInput.max = maxVal;
     }
-    // ===== Restaurar estado al cargar =====
-    const savedState = loadState();
 
-    // restaurar fecha si existe
-    if (savedState.date) {
-        dateInput.value = savedState.date;
-    }
-
-    // si no había fecha guardada, poner hoy
-    if (!dateInput.value) {
+    function setNowToDateInput() {
         const now = new Date();
         dateInput.value =
             `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
     }
 
-    // max siempre hoy
+    function resetInstructorUI() {
+        instructorIdInput.value = '';
+        if (instructorBtnText) instructorBtnText.textContent = 'Seleccione instructor…';
+        else instructorBtn.textContent = 'Seleccione instructor…';
+    }
+
+    // ===== Init: solo conservar si fue RELOAD =====
+    const navType = getNavType();
+    if (navType !== 'reload') {
+        // Si llegó por navegación normal / volver atrás / cambiar sección: NO conservar
+        sessionStorage.removeItem(STATE_KEY);
+    }
+
+    // Restaurar (solo si era reload) o poner valores por defecto
+    const savedState = loadState();
+
+    // fecha/hora
+    if (navType === 'reload' && savedState.date) {
+        dateInput.value = savedState.date;
+    } else {
+        setNowToDateInput();
+    }
     setMaxToday();
 
-    // restaurar instructor si existe
-    if (savedState.instructor_id && savedState.instructor_name) {
+    // instructor
+    if (navType === 'reload' && savedState.instructor_id && savedState.instructor_name) {
         instructorIdInput.value = savedState.instructor_id;
         if (instructorBtnText) instructorBtnText.textContent = savedState.instructor_name;
         else instructorBtn.textContent = savedState.instructor_name;
@@ -166,8 +194,9 @@
         if (dateInput.value) {
             setTimeout(() => debounceLoad(), 50);
         }
+    } else {
+        resetInstructorUI();
     }
-
 
     function debounceLoad() {
         clearTimeout(t);
@@ -255,7 +284,6 @@
         }
     }
 
-
     function showPill(el) {
         [loadingPill, savedPill, errorPill].forEach(x => x.classList.add('d-none'));
         if (el) el.classList.remove('d-none');
@@ -302,9 +330,6 @@
 
         return `<span class="badge badge-light border" style="border-radius:999px;padding:.45rem .6rem;">—</span>`;
     }
-
-
-
 
     function setMeta(meta) {
         if (!meta) {
@@ -375,20 +400,14 @@
     }
 
     function renderTable(records) {
-
-        // ✅ Si NO hay registros por el filtro (pero sí hay data base cargada)
         if (!records || records.length === 0) {
-            searchInput.disabled = false; // ✅ NO BLOQUEAR
+            searchInput.disabled = false;
             tableWrap.innerHTML = `
       <div class="alert alert-warning mb-0 py-2" style="border-radius:12px;">
         No se encontraron resultados para “<b>${escapeHtml(searchInput.value || '')}</b>”.
       </div>`;
             return;
         }
-
-        // ✅ Si hay registros, normal
-        searchInput.disabled = false;
-
 
         searchInput.disabled = false;
 
@@ -405,7 +424,6 @@
   </div>
 </td>
 
-
        <td style="min-width:260px;">
   ${(r.observations && String(r.observations).trim().length)
                 ? `<button type="button"
@@ -418,7 +436,6 @@
             }
 </td>
 
-
       <td style="min-width:140px;">
   ${r.evidence_url
                 ? `<a href="${escapeHtml(r.evidence_url)}"
@@ -430,7 +447,6 @@
                 : `<span class="text-muted"><small><em>Sin evidencia</em></small></span>`
             }
 </td>
-
 
         <td style="white-space:nowrap;">
           <small class="text-muted">${escapeHtml(formatTimeForTable(r.attendance_time) || '')}</small>
@@ -461,8 +477,6 @@
       </table>`;
     }
 
-
-
     function openEditModal(record) {
         modalRecordId.value = record.id;
         modalStatus.value = record.attendance_status || 'present';
@@ -480,7 +494,6 @@
         modalMsg.textContent = '';
         modalMsg.className = 'me-auto text-muted small';
 
-        /* ✅ PEGAR AQUÍ */
         editingOriginalTime = hhmmFromAny(record.attendance_time);
 
         if (modalTime) {
@@ -494,10 +507,8 @@
                 modalTime.max = '';
             }
         }
-        /* ✅ HASTA AQUÍ */
 
         showModal();
-
     }
 
     // Instructor seleccionar
@@ -512,15 +523,11 @@
         if (instructorBtnText) instructorBtnText.textContent = name;
         else instructorBtn.textContent = name;
 
-        // ✅ guardar instructor
-        saveState({
-            instructor_id: id,
-            instructor_name: name
-        });
+        // guardar SOLO para reload
+        saveState({ instructor_id: id, instructor_name: name });
 
         hideDropdown();
         debounceLoad();
-
     });
 
     // Instructor buscar
@@ -534,12 +541,10 @@
 
     // Fecha cambia
     dateInput.addEventListener('change', () => {
-        saveState({
-            date: dateInput.value || ''
-        });
+        // guardar SOLO para reload
+        saveState({ date: dateInput.value || '' });
         debounceLoad();
     });
-
 
     // filtros estado
     filterButtons.forEach(btn => {
@@ -563,6 +568,7 @@
         const record = lastRecords.find(x => String(x.id) === String(id));
         if (record) openEditModal(record);
     });
+
     // Ver Observación (modal)
     tableWrap.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-obs]');
@@ -605,8 +611,7 @@
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest'
                 }
-            }
-            );
+            });
 
             const data = await res.json();
 
@@ -644,7 +649,6 @@
         }
     }
 
-
     // Guardar desde modal (FormData)
     modalSave.addEventListener('click', async () => {
         const id = modalRecordId.value;
@@ -654,7 +658,6 @@
         fd.append('attendance_status', modalStatus.value);
         fd.append('observations', modalObs.value);
 
-        /* ✅ PEGAR AQUÍ */
         const newTime = modalTime ? hhmmFromAny(modalTime.value) : '';
         const originalTime = editingOriginalTime || '';
 
@@ -670,17 +673,14 @@
 
             fd.append('attendance_time', newTime);
         }
-        /* ✅ HASTA AQUÍ */
 
         if (modalEvidence.files && modalEvidence.files[0]) {
             fd.append('evidence', modalEvidence.files[0]);
         }
 
-        // UI local
         modalMsg.textContent = 'Guardando…';
         modalMsg.className = 'me-auto text-muted small';
 
-        // (opcional) Swal loading
         if (window.Swal) {
             Swal.fire({
                 title: 'Guardando cambios…',
@@ -699,7 +699,6 @@
                 body: fd
             });
 
-
             const data = await res.json();
 
             if (!data.ok) {
@@ -711,9 +710,8 @@
                 return;
             }
 
-            // ✅ Cerrar modal
             hideModal();
-            // ✅ actualizar SOLO la fila editada en la tabla (sin recargar todo)
+
             if (data.record) {
                 patchRowInDom(data.record);
             } else {
@@ -721,17 +719,14 @@
                     id: id,
                     attendance_status: modalStatus.value,
                     observations: modalObs.value,
-                    evidence_url: null, // si el backend no responde evidencia
-                    attendance_time: '' // si el backend no responde hora
+                    evidence_url: null,
+                    attendance_time: ''
                 });
             }
 
-
-            // Pills
             showPill(savedPill);
             setTimeout(() => showPill(null), 800);
 
-            // ✅ Swal éxito
             if (window.Swal) Swal.close();
             toastSuccess('Actualización completa');
 
@@ -743,9 +738,6 @@
         }
     });
 
-    // OJO: instructor se carga al seleccionar en dropdown, ya llama debounceLoad()
-    // Aquí solo garantizamos que si el usuario cambia fecha, recargue (ya está)
-    // y que al abrir la página no dispare hasta que haya instructor (tu lógica actual)
     function patchRowInDom(updated) {
         const tr = tableWrap.querySelector(`tr[data-row-id="${updated.id}"]`);
         if (!tr) return;
@@ -769,11 +761,9 @@
                 obsCell.innerHTML = `<span class="text-muted"><small><em>Sin observación</em></small></span>`;
             }
 
-            // importante: mantener actualizado el lastRecords
             const idx = lastRecords.findIndex(x => String(x.id) === String(updated.id));
             if (idx !== -1) lastRecords[idx].observations = updated.observations;
         }
-
 
         const evCell = tr.children[3];
         if (evCell) {
@@ -784,7 +774,6 @@
                 evCell.innerHTML = `<span class="text-muted"><small>—</small></span>`;
             }
         }
-
 
         const timeCell = tr.children[4];
         if (timeCell && updated.attendance_time != null) {
