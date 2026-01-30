@@ -85,23 +85,23 @@ $rol_security_personnel = Role::firstOrCreate(['slug' => 'sigac.security.personn
 ]);
 
 
-      
+      /*
         $user_academic_coordinator = User::where('nickname', 'mgonzalezg')->first(); // Usuario Coordinador Académico (María Antonia Gonzáles Gonzáles)
         $user_instructor = User::where('nickname', 'rudelgadoc')->first(); // Usuario Instructor (Diego Andrés Mendez Pastrana)
         $user_wellness = User::where('nickname', 'epascuasp')->first(); // Usuario Bienestar (Esperanza Pascuas Perdomo)
         $user_apprentice = User::where('nickname', 'JDGM0331')->first(); // Usuario Aprendiz (Jesús David Guevara Munar)
         $user_apprentice = User::where('nickname', 'DUFETRLLA')->first(); // Usuario Aprendiz (Jesús David Guevara Munar)
         $user_superadmin = User::where('nickname', 'Resmerveilons')->first(); // Usuario Super Administrador (Manuel Steven Ossa Lievano)
-       // $user_tutor = User::where('nickname', 'YERSON MAURICIO')->first();
-       // $user_personnel_security = User::where('nickname', 'jessica')->first();
+        $user_tutor = User::where('nickname', 'YERSON MAURICIO')->first();
+        $user_personnel_security = User::where('nickname', 'jessica')->first();
 
         // Asignación de ROLES para los USUARIOS de la aplicación SIGAC (Sincronización de las relaciones sin eliminar las relaciones existentes)
         $user_academic_coordinator->roles()->syncWithoutDetaching([$rol_academic_coordinator->id]);
         $user_instructor->roles()->syncWithoutDetaching([$rol_instructor->id]);
         $user_wellness->roles()->syncWithoutDetaching([$rol_wellness->id]);
         $user_apprentice->roles()->syncWithoutDetaching([$rol_apprentice->id]);
-       // $user_tutor->roles()->syncWithoutDetaching([$rol_tutor->id]);
-      //  $user_security_personnel->roles()->syncWithoutDetaching([$rol_personnel_security->id]);
+       $user_tutor->roles()->syncWithoutDetaching([$rol_tutor->id]);
+       $user_personnel_security->roles()->syncWithoutDetaching([$rol_security_personnel->id]);*/
 
 
     }

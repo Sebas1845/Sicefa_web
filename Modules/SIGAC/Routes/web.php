@@ -70,7 +70,7 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
             Route::get('apprentice', 'apprentice_dashboard')->name('sigac.apprentice.dashboard'); // Panel de control de aprendiz (Aprendiz)
             Route::get('support', 'support_dashboard')->name('sigac.support.dashboard'); // Panel de control de apoyo (Apoyo)
             Route::get('securitystaff', 'securitystaff_dashboard')->name('sigac.securitystaff.dashboard'); // Panel de control de apoyo (Apoyo)
-            Route::get('securitypersonnel', 'securitypersonnel_dashboard')->name('sigac.securitypersonnel.dashboard'); // Panel de control del personal de seguridad (Apoyo)
+            Route::get('securitypersonnel', 'securitypersonnel_dashboard')->name('sigac.security.personnel.dashboard'); // Panel de control del personal de seguridad (Apoyo)
 
         });
 
@@ -396,7 +396,7 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
 
         });
 
-        //RUTAS PARA SOLICITUDES DE PERMISOS (Duvan Trujillo)
+        //RUTAS PARA SOLICITUDES DE PERMISOS (Duvan Trujillo 2025)
 
         
    Route::controller(PermissionValidationController::class)->group(function () {
@@ -425,7 +425,7 @@ Route::middleware(['lang'])->group(function () { //Middleware que permite la int
 
     // BIENESTAR
     Route::prefix('bienestar/apprentice_permissions')->group(function () {
-        Route::get('index', 'index')->name('sigac.bienestar.PermissionValidation.index');
+        Route::get('index', 'index')->name('sigac.wellness.PermissionValidation.index');
         Route::post('post', 'store')->name('sigac.bienestar.PermissionValidation.store');
         Route::post('cancel', 'cancel')->name('sigac.bienestar.PermissionValidation.cancel');
         Route::get('wellnessValidationHistory', 'wellnessValidationHistory')->name('sigac.wellness.PermissionValidation.wellnessValidationHistory');

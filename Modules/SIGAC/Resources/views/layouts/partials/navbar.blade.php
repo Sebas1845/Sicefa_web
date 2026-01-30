@@ -47,7 +47,7 @@
             
             @if (checkRol('sigac.security.personnel'))
                 <li class="nav-item d-none d-sm-inline-block mx-1">
-                    <a href="{{ route('sigac.securitypersonnel.dashboard') }}" class="nav-link @if(Route::is('sigac.security.personnel.*')) active @endif">{{ trans('sigac::general.Securitystaff') }}</a>
+                    <a href="{{ route('sigac.security.personnel.dashboard') }}" class="nav-link @if(Route::is('sigac.security.personnel.*')) active @endif">{{ trans('sigac::general.Securitystaff') }}</a>
                 </li>
             @endif
 

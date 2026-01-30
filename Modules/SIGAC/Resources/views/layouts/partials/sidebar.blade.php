@@ -436,23 +436,23 @@
                                 </ul>
                             </li>
                             <li class="nav-item">
-                            <a href="#" class="nav-link">
-                                <i class="nav-icon fas fa-address-book"></i>
-                                <p>
-                                    Asistencias
-                                    <i class="right fas fa-angle-left"></i>
-                                </p>
-                            </a>
-                            <ul class="nav nav-treeview">
-                                <li class="nav-item">
-                                    <a href="{{ route('sigac.academic_coordination.attendancesrecord.view_edit_page') }}"
-                                        class="nav-link">
-                                        <i class="nav-icon fas fa-pen"></i>
-                                        <p>Editar Asistencias</p>
-                                    </a>
-                                </li>
-                            </ul>
-                        </li>
+                                <a href="#" class="nav-link">
+                                    <i class="nav-icon fas fa-address-book"></i>
+                                    <p>
+                                        Asistencias
+                                        <i class="right fas fa-angle-left"></i>
+                                    </p>
+                                </a>
+                                <ul class="nav nav-treeview">
+                                    <li class="nav-item">
+                                        <a href="{{ route('sigac.academic_coordination.attendancesrecord.view_edit_page') }}"
+                                            class="nav-link">
+                                            <i class="nav-icon fas fa-pen"></i>
+                                            <p>Editar Asistencias</p>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
                         @endif
                     @endif
 
@@ -776,7 +776,7 @@
                             </a>
                             <ul class="nav nav-treeview items">
                                 <li class="nav-item">
-                                    <a href="{{ route('sigac.bienestar.PermissionValidation.index') }}"
+                                    <a href="{{ route('sigac.wellness.PermissionValidation.index') }}"
                                         class="nav-link">
                                         <i class="nav-icon fas fa-file-invoice"></i>
                                         <p>Solicitud</p>
@@ -927,27 +927,29 @@
                     {{-- DEBUG: Ver nombre de la ruta actual --}}
 
                     {{-- Verifica si el usuario tiene el permiso "sigac.securitypersonnel.dashboard" --}}
-                    @if (Route::is('sigac.securitypersonnel.*'))
-                        @if (Auth::user()->havePermission('sigac.securitypersonnel.dashboard'))
-                            <li class="nav-item">
-                            <li class="nav-item">
-                                <a href="#" class="nav-link">
+                    @if (Route::is('sigac.security.personnel.*'))
+                        @if (Auth::user()->havePermission('sigac.security.personnel.dashboard'))
+                            <li
+                                class="nav-item {{ Route::is('sigac.security.personnel.permission.*') ? 'menu-open' : '' }}">
+                                <a href="#"
+                                    class="nav-link {{ Route::is('sigac.security.personnel.permission.*') ? 'active' : '' }}">
                                     <i class="nav-icon fas fa-book"></i>
                                     <p>
                                         Solicitudes permisos
                                         <i class="right fas fa-angle-left"></i>
                                     </p>
                                 </a>
-                                <ul class="nav nav-treeview items">
+
+                                <ul class="nav nav-treeview items"
+                                    style="{{ Route::is('sigac.security.personnel.permission.*') ? '' : 'display: none;' }}">
                                     <li class="nav-item">
                                         <a href="{{ route('sigac.security.personnel.permission.index') }}"
-                                            class="nav-link">
+                                            class="nav-link {{ Route::is('sigac.security.personnel.permission.index') ? 'active' : '' }}">
                                             <i class="nav-icon fas fa-file-invoice"></i>
                                             <p>Solicitud</p>
                                         </a>
                                     </li>
                                 </ul>
-                            </li>
                             </li>
                         @endif
                     @endif

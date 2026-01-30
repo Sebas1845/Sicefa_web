@@ -36,11 +36,10 @@ class PermissionsTableSeeder extends Seeder
 
 
 
-
-
-
-       $permission = Permission::updateOrCreate(
-    ['slug' => 'sigac.securitypersonnel.dashboard'], // Buscar por slug o crear nuevo permiso
+//* Duvan Trujillo 2026  {{SOLICITUD DE PERMISOS PARA EL PERSONAL DE SEGURIDAD}}//
+   
+$permission = Permission::updateOrCreate(
+    ['slug' => 'sigac.security.personnel.dashboard'],
     [
         'name' => 'Panel de control de personal de seguridad (Apoyo)',
         'description' => 'Permiso para acceder y gestionar el panel de control de personal de seguridad de apoyo',
@@ -49,11 +48,10 @@ class PermissionsTableSeeder extends Seeder
     ]
 );
 
-$permission_security_personnel[] = $permission->id; // Guardar ID del permiso para asignarlo a un rol
-
+$permissions_security_personnel[] = $permission->id;
 
 $permission = Permission::updateOrCreate(
-    ['slug' => 'sigac.security.personnel.permission.index'], // Permiso para Solicitud de permisos.
+    ['slug' => 'sigac.security.personnel.permission.index'],
     [
         'name' => 'Ver permisos aprobados (Personal de Seguridad)',
         'description' => 'Permite al personal de seguridad ver únicamente las solicitudes de permisos aprobados',
@@ -62,9 +60,7 @@ $permission = Permission::updateOrCreate(
     ]
 );
 
-$permissions_security_personnel[] = $permission->id; // Almacenar permiso para rol
-
-
+$permissions_security_personnel[] = $permission->id;
 
 
 
@@ -1934,7 +1930,7 @@ $permissions_tutor[] = $permission->id;
 
 // 🔹 BIENESTAR
 $permission = Permission::updateOrCreate(
-    ['slug' => 'sigac.bienestar.PermissionValidation.index'],
+    ['slug' => 'sigac.wellness.PermissionValidation.index'],
     [
         'name' => 'Ver solicitudes especiales (Bienestar)',
         'description' => 'Permite al personal de Bienestar revisar solicitudes por enfermedad, cita médica o menores de edad.',
@@ -2241,7 +2237,7 @@ $permissions_tutor[] = $permission->id;
 
 // 🔹 BIENESTAR
 $permission = Permission::updateOrCreate(
-    ['slug' => 'sigac.bienestar.PermissionValidation.index'],
+    ['slug' => 'sigac.wellness.PermissionValidation.index'],
     [
         'name' => 'Ver solicitudes especiales (Bienestar)',
         'description' => 'Permite al personal de Bienestar revisar solicitudes por enfermedad, cita médica o menores de edad.',
