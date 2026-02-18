@@ -144,4 +144,120 @@ class TravelRequest extends Model
     {
         return $this->hasMany(\Modules\GDF\Entities\TravelSegment::class, 'travel_request_id');
     }
+    public function allowances()
+    {
+        return $this->hasMany(\Modules\GDF\Entities\TravelAllowance::class, 'travel_request_id');
+    }
+    public function createdBy()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'created_by');
+    }
+    public const STATUS_LABELS = [
+        'draft'                => 'Borrador',
+        'submitted'            => 'Enviada',
+        'pending_treasury'     => 'En Tesorería (pendiente)',
+        'approved_by_treasury' => 'Aprobada por Tesorería',
+        'approved'             => 'Aprobada',
+        'rejected'             => 'Rechazada',
+        'returned'             => 'Devuelta',
+        'executed'             => 'Ejecutada',
+        'cancelled'            => 'Cancelada',
+    ];
+
+    public const STATUS_BADGES = [
+        'draft'                => 'secondary',
+        'submitted'            => 'primary',
+        'pending_treasury'     => 'warning',
+        'approved_by_treasury' => 'info',
+        'approved'             => 'success',
+        'rejected'             => 'danger',
+        'returned'             => 'dark',
+        'executed'             => 'success',
+        'cancelled'            => 'secondary',
+    ];
+
+    // Texto bonito
+    public function getStatusLabelAttribute(): string
+    {
+        $s = (string) ($this->status ?? '');
+        return self::STATUS_LABELS[$s] ?? strtoupper($s ?: 'N/A');
+    }
+
+    // Clase para badge bootstrap (bg-*)
+    public function getStatusBadgeAttribute(): string
+    {
+        $s = (string) ($this->status ?? '');
+        return self::STATUS_BADGES[$s] ?? 'secondary';
+    }
+
+    public function personName(): string
+    {
+        return $this->person ? $this->person->full_name : 'N/A';
+    }
+
+    public function municipality()
+    {
+        return $this->belongsTo(\Modules\SICA\Entities\Municipality::class, 'municipality_id');
+    }
+
+    public function village()
+    {
+        return $this->belongsTo(\Modules\SICA\Entities\Village::class, 'village_id');
+    }
+
+    public function getApplicantDisplayAttribute(): string
+    {
+        if (!empty($this->applicant_name)) return $this->applicant_name;
+
+        $p = $this->relationLoaded('person') ? $this->person : null;
+        if ($p) {
+            return $p->full_name
+                ?? $p->name
+                ?? trim(($p->first_name ?? '') . ' ' . ($p->first_last_name ?? '') . ' ' . ($p->second_last_name ?? ''));
+        }
+
+        return $this->person_id ? ('Persona #' . $this->person_id) : '—';
+    }
+
+    public function getDestinationDisplayAttribute(): string
+    {
+        if (!empty($this->destination)) return $this->destination;
+
+        $placeType = (string)($this->place_type ?? 'municipio');
+
+        if ($placeType === 'vereda') {
+            $v = $this->relationLoaded('village') ? $this->village : null;
+            return $v ? ('Vereda: ' . $v->name) : ($this->village_id ? 'Vereda #' . $this->village_id : '—');
+        }
+
+        $m = $this->relationLoaded('municipality') ? $this->municipality : null;
+        return $m ? ('Municipio: ' . $m->name) : ($this->municipality_id ? 'Municipio #' . $this->municipality_id : '—');
+    }
+
+    public static function statusLabel(?string $s): string
+    {
+        $s = strtolower((string)$s);
+
+        return match ($s) {
+            'draft'                => 'Borrador',
+            'submitted'            => 'Enviada',
+            'approved_by_treasury' => 'Aprobada por Tesorería',
+
+            // ✅ ahora approved = Coordinación
+            'approved'             => 'Aprobada por Coordinación',
+
+            // ✅ nuevo final
+            'confirmed'            => 'Confirmada por Subdirección',
+
+            'returned'             => 'Devuelta',
+            'rejected'             => 'Rechazada',
+            'cancelled'            => 'Cancelada',
+            default                => strtoupper($s ?: '—'),
+        };
+    }
+
+    public function documents()
+    {
+        return $this->hasMany(\Modules\GDF\Entities\TravelDocument::class, 'travel_request_id');
+    }
 }

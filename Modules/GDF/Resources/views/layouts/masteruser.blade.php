@@ -4,18 +4,19 @@
     @include('gdf::layouts.partials.head')
     @stack('head')
 </head>
-<body class="gdf-public" data-theme="dark">
 
-@include('gdf::layouts.partials.navbar')
-<main class="py-5" id="info">
-    <div class="container">
-        @yield('content')
-    </div>
-</main>
+<body class="gdf-public">
+    @include('gdf::layouts.partials.navbar')
 
-@include('gdf::layouts.partials.footer')
-@include('gdf::layouts.partials.scripts')
+    <main class="py-5" id="info">
+        <div class="container">
+            @yield('content')
+        </div>
+    </main>
 
-@stack('scripts')
+    @include('gdf::layouts.partials.footer')
+    @include('gdf::layouts.partials.scripts')
+
+    @stack('scripts')
 </body>
 </html>

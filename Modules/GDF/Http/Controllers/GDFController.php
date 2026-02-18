@@ -12,65 +12,89 @@ use Modules\GDF\Entities\TravelRequest;
 
 class GDFController extends Controller
 {
+
+
     /* ============================================================
      * HOME del módulo: decide si entra directo o muestra CTA al gateway
      * ============================================================ */
     public function index(Request $request)
     {
-        // Invitado
+        // 1) Invitado => vista pública (inspección)
         if (!auth()->check()) {
-            return view('gdf::index', [
-                'primaryAction' => [
-                    'route' => route('login'),
-                    'label' => 'Iniciar sesión',
-                    'icon'  => 'bi-box-arrow-in-right'
-                ],
-                'hasGdfAccess' => false,
-            ]);
+            return $this->publicLanding($request);
         }
 
-        // Opciones robustas (checkRol o fallback BD) + áreas por asignaciones con grace
+        // 2) Autenticado => flujo normal (tu lógica actual)
+        return $this->privateIndex($request);
+    }
+
+    /**
+     * Landing pública (sin login)
+     * - NO usa checkRol
+     * - Solo muestra info del sistema + links + botón login
+     */
+    private function publicLanding(Request $request)
+    {
+        return view('gdf::home', [
+            'primaryAction' => [
+                'route' => route('login'),
+                'label' => 'Iniciar sesión',
+                'icon'  => 'bi-box-arrow-in-right',
+            ],
+            'hasGdfAccess' => false,
+        ]);
+    }
+
+    /**
+     * Index privado (logueado) = tu método index actual, tal cual,
+     * pero corregido el warning final.
+     */
+    private function privateIndex(Request $request)
+    {
         $options = $this->getContextOptionsForUserRobust(8);
 
-        // Sin acceso real a GDF (o sin áreas asignadas para roles que dependen de áreas)
         if (empty($options)) {
             return view('gdf::index', [
-                'primaryAction' => ['route' => route('gdf.gateway'), 'label' => 'Elegir área / contexto', 'icon' => 'bi-grid-1x2'],
-                'hasGdfAccess'  => false,
-                'warning'       => 'Tu usuario no tiene roles/áreas asignadas en GDF (o tu asignación aún no está dentro del plazo de ingreso).',
+                'primaryAction' => [
+                    'route' => route('gdf.gateway'),
+                    'label' => 'Elegir área / contexto',
+                    'icon'  => 'bi-grid-1x2'
+                ],
+                'hasGdfAccess' => false,
+                'warning'      => 'Tu usuario no tiene roles/áreas asignadas en GDF (o tu asignación aún no está dentro del plazo de ingreso).',
             ]);
         }
 
-        // Si hay 1 sola opción, intenta auto-entrar
         if (count($options) === 1) {
             $only  = $options[0];
             $role  = $only['key'];
             $areas = $only['areas'] ?? [];
 
-            // Roles sin área -> entra directo
             if (!$this->roleRequiresArea($role)) {
                 session(['gdf_context' => ['role' => $role, 'area' => null]]);
                 return $this->redirectByContext($role, null);
             }
 
-            // Rol con 1 sola área -> entra directo con esa área
             if (count($areas) === 1) {
                 session(['gdf_context' => ['role' => $role, 'area' => $areas[0]]]);
                 return $this->redirectByContext($role, $areas[0]);
             }
 
-            // Requiere área y tiene >1 -> gateway
             return redirect()->route('gdf.gateway');
         }
 
-        // Varias opciones -> CTA al gateway
         return view('gdf::index', [
-            'primaryAction' => ['route' => route('gdf.gateway'), 'label' => 'Elegir área / contexto', 'icon' => 'bi-grid-1x2'],
-            'hasGdfAccess'  => true,
-            'warning' => 'No tienes roles GDF asignados.',
-
+            'primaryAction' => [
+                'route' => route('gdf.gateway'),
+                'label' => 'Elegir área / contexto',
+                'icon'  => 'bi-grid-1x2'
+            ],
+            'hasGdfAccess' => true,
+            'warning'      => null, // ✅ corregido
         ]);
     }
+
+
 
     /* ============================================================
      * Proceso: redirige según el contexto actual
@@ -197,9 +221,14 @@ class GDFController extends Controller
                 ? redirect()->route('gdf.instructor.dashboard')
                 : redirect()->route('gdf.gateway'),
 
-            'coord', 'support' => $area === 'academic'
-                ? (Route::has('gdf.academic.dashboard') ? redirect()->route('gdf.academic.dashboard') : redirect()->route('gdf.gateway'))
-                : (Route::has('gdf.campesena.dashboard') ? redirect()->route('gdf.campesena.dashboard') : redirect()->route('gdf.gateway')),
+            'coord' => $area === 'academic'
+                ? redirect()->route('gdf.academic.dashboard')
+                : redirect()->route('gdf.campesena.dashboard'),
+
+            'support' => $area === 'academic'
+                ? redirect()->route('gdf.support.academic.dashboard')
+                : redirect()->route('gdf.support.campesena.dashboard'),
+
 
             'treasury' => Route::has('gdf.treasury.dashboard')
                 ? redirect()->route('gdf.treasury.dashboard')
@@ -216,32 +245,58 @@ class GDFController extends Controller
     private function dashboardByGroup(Request $request, string $group)
     {
         $areaIds = (array) config("gdf.area_groups.$group", []);
-        if (empty($areaIds)) {
-            abort(403, "Área {$group} no configurada en gdf.area_groups");
-        }
+        if (empty($areaIds)) abort(403, "Área {$group} no configurada en gdf.area_groups");
 
-        $q = trim((string) $request->get('q', ''));
+        $ctx  = session('gdf_context', []);
+        $role = (string)($ctx['role'] ?? '');
 
-        $query = TravelRequest::query()
-            ->where('status', 'approved_by_treasury')
-            ->whereIn('area_id', $areaIds);
-
-        if ($q !== '') {
-            $query->where(function ($sub) use ($q) {
-                $sub->where('origin', 'like', "%{$q}%")
-                    ->orWhere('destination', 'like', "%{$q}%")
-                    ->orWhere('id', $q);
-            });
-        }
-
-        $requests = $query->latest('updated_at')->paginate(15)->appends(['q' => $q]);
-
+        // Prefijos y labels por área
         $areaKey     = $group;
         $routePrefix = $group === 'academic' ? 'gdf.academic' : 'gdf.campesena';
-        $title       = $group === 'academic' ? 'Coordinación Académica' : 'Coordinación Campesena';
 
-        return view('gdf::coordination.dashboard', compact('requests', 'q', 'areaKey', 'routePrefix', 'title'));
+        // =========================
+        // COORDINACIÓN: lista de solicitudes aprobadas por tesorería
+        // =========================
+        if ($role === 'coord') {
+            $q = trim((string) $request->get('q', ''));
+
+            $query = TravelRequest::query()
+                ->where('status', 'approved_by_treasury')
+                ->whereIn('area_id', $areaIds);
+
+            if ($q !== '') {
+                $query->where(function ($sub) use ($q) {
+                    $sub->where('origin', 'like', "%{$q}%")
+                        ->orWhere('destination', 'like', "%{$q}%")
+                        ->orWhere('id', $q);
+                });
+            }
+
+            $requests = $query->latest('updated_at')->paginate(15)->appends(['q' => $q]);
+
+            $title = $group === 'academic' ? 'Coordinación Académica' : 'Coordinación Campesena';
+
+            return view('gdf::coordination.dashboard', compact('requests', 'q', 'areaKey', 'routePrefix', 'title'));
+        }
+
+        // =========================
+        // APOYO: tu dashboard propio (motos + bandeja)
+        // =========================
+        if ($role === 'support') {
+            // KPI + bandejas (si ya tienes SupportDashboardController, puedes redirigir allá)
+            $title = $group === 'academic' ? 'Apoyo Coordinación Académica' : 'Apoyo Campesena';
+
+            // Si ya construiste esta vista:
+            // return view('gdf::support.dashboard', compact('areaKey','routePrefix','title','kpis','quickRequests','queueApproved','queueDelivered'));
+
+            // Si aún no pasas datos, al menos separa vista:
+            return view('gdf::support.dashboard', compact('areaKey', 'routePrefix', 'title'));
+        }
+
+        // Si alguien entra sin rol esperado
+        return redirect()->route('gdf.gateway')->with('warning', 'Contexto inválido para este dashboard.');
     }
+
 
     /* ============================================================
      * Context options: robusto (checkRol o fallback BD)
@@ -262,7 +317,7 @@ class GDFController extends Controller
                 'gdf.treasury'             => checkRol('gdf.treasury'),
                 'gdf.instructor'           => checkRol('gdf.instructor'),
                 'gdf.academic_coordinator' => checkRol('gdf.academic_coordinator'),
-                'gdf.campesena_coordinator'=> checkRol('gdf.campesena_coordinator'),
+                'gdf.campesena_coordinator' => checkRol('gdf.campesena_coordinator'),
                 'gdf.academic_support'     => checkRol('gdf.academic_support'),
                 'gdf.campesena_support'    => checkRol('gdf.campesena_support'),
                 'gdf.admin'                => checkRol('gdf.admin'),
@@ -279,12 +334,12 @@ class GDFController extends Controller
         // Superadmin: ve todo (sin depender de asignaciones)
         if ($hasRole('gdf.superadmin')) {
             return [
-                ['key'=>'superadmin','label'=>'Super Admin','desc'=>'Acceso total y soporte.','icon'=>'bi-shield-lock','areas'=>[]],
-                ['key'=>'subdirection','label'=>'Subdirección','desc'=>'Administra parametrización.','icon'=>'bi-diagram-3','areas'=>[]],
-                ['key'=>'treasury','label'=>'Tesorería','desc'=>'Aprueba y gestiona pagos.','icon'=>'bi-cash-coin','areas'=>[]],
-                ['key'=>'coord','label'=>'Coordinación','desc'=>'Gestiona solicitudes por área.','icon'=>'bi-mortarboard','areas'=>['academic','campesena']],
-                ['key'=>'support','label'=>'Apoyo','desc'=>'Valida soportes por área.','icon'=>'bi-person-check','areas'=>['academic','campesena']],
-                ['key'=>'official','label'=>'Instructor / Funcionario','desc'=>'Crea solicitudes por área.','icon'=>'bi-person-badge','areas'=>['academic','campesena']],
+                ['key' => 'superadmin', 'label' => 'Super Admin', 'desc' => 'Acceso total y soporte.', 'icon' => 'bi-shield-lock', 'areas' => []],
+                ['key' => 'subdirection', 'label' => 'Subdirección', 'desc' => 'Administra parametrización.', 'icon' => 'bi-diagram-3', 'areas' => []],
+                ['key' => 'treasury', 'label' => 'Tesorería', 'desc' => 'Aprueba y gestiona pagos.', 'icon' => 'bi-cash-coin', 'areas' => []],
+                ['key' => 'coord', 'label' => 'Coordinación', 'desc' => 'Gestiona solicitudes por área.', 'icon' => 'bi-mortarboard', 'areas' => ['academic', 'campesena']],
+                ['key' => 'support', 'label' => 'Apoyo', 'desc' => 'Valida soportes por área.', 'icon' => 'bi-person-check', 'areas' => ['academic', 'campesena']],
+                ['key' => 'official', 'label' => 'Instructor / Funcionario', 'desc' => 'Crea solicitudes por área.', 'icon' => 'bi-person-badge', 'areas' => ['academic', 'campesena']],
             ];
         }
 
@@ -292,11 +347,11 @@ class GDFController extends Controller
 
         // Roles sin área
         if ($hasRole('gdf.subdirection')) {
-            $options[] = ['key'=>'subdirection','label'=>'Subdirección','desc'=>'Administra parametrización.','icon'=>'bi-diagram-3','areas'=>[]];
+            $options[] = ['key' => 'subdirection', 'label' => 'Subdirección', 'desc' => 'Administra parametrización.', 'icon' => 'bi-diagram-3', 'areas' => []];
         }
 
         if ($hasRole('gdf.treasury')) {
-            $options[] = ['key'=>'treasury','label'=>'Tesorería','desc'=>'Aprueba y gestiona pagos.','icon'=>'bi-cash-coin','areas'=>[]];
+            $options[] = ['key' => 'treasury', 'label' => 'Tesorería', 'desc' => 'Aprueba y gestiona pagos.', 'icon' => 'bi-cash-coin', 'areas' => []];
         }
 
         // Instructor: áreas desde person_area_budget_assignments con GRACE para entrar
@@ -453,5 +508,25 @@ class GDFController extends Controller
         }
 
         return array_values(array_unique($areas));
+    }
+
+    /* ============================================================
+ * PÁGINAS PÚBLICAS (INSPECCIÓN)
+ * ============================================================ */
+
+
+    public function Developers()
+    {
+        return view('gdf::developers');
+    }
+
+    public function About()
+    {
+        return view('gdf::about');
+    }
+
+    public function Tech()
+    {
+        return view('gdf::tech');
     }
 }

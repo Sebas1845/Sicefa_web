@@ -106,4 +106,9 @@ class MotorcycleAssignment extends Model
     {
         return $q->whereIn('status', ['approved', 'delivered']);
     }
+    public function travel_requestable()
+{
+    return $this->morphTo();
+}
+
 }

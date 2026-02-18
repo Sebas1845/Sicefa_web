@@ -5,6 +5,9 @@ namespace Modules\SICA\Entities;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use OwenIt\Auditing\Contracts\Auditable;
+use Modules\SICA\Entities\ContractorType;
+use Modules\SICA\Entities\EmployeeType;
+use Modules\GTH\Entities\ContractDetail;
 
 class Contractor extends Model implements Auditable
 {
@@ -47,38 +50,56 @@ class Contractor extends Model implements Auditable
     ];
 
     // MUTADORES Y ACCESORES
-    public function setContractObjectAttribute($value){ // Convierte el primer carácter en mayúscula del dato contract_object (MUTADOR)
+    public function setContractObjectAttribute($value)
+    { // Convierte el primer carácter en mayúscula del dato contract_object (MUTADOR)
         $this->attributes['contract_object'] = ucfirst($value);
     }
-    public function setContractObligationsAttribute($value){ // Convierte el primer carácter en mayúscula del dato contract_obligations (MUTADOR)
+    public function setContractObligationsAttribute($value)
+    { // Convierte el primer carácter en mayúscula del dato contract_obligations (MUTADOR)
         $this->attributes['contract_obligations'] = ucfirst($value);
     }
-    public function setRiskTypeAttribute($value){ // Convertir a mayúsculas el valor del dato risk_type (MUTADOR)
+    public function setRiskTypeAttribute($value)
+    { // Convertir a mayúsculas el valor del dato risk_type (MUTADOR)
         $this->attributes['risk_type'] = mb_strtoupper($value);
     }
-    public function setSesionAttribute($value){ // Capitalización de palabras del dato sesion (MUTADOR)
+    public function setSesionAttribute($value)
+    { // Capitalización de palabras del dato sesion (MUTADOR)
         $this->attributes['sesion'] = ucwords(strtolower($value));
     }
 
     // RELACIONES
-    public function contractor_type(){ // Accede al tipo de contratación al que pertenece
+    public function contractor_type()
+    { // Accede al tipo de contratación al que pertenece
         return $this->belongsTo(ContractorType::class);
     }
-    public function employee_type(){ // Accede al tipo de empleado al que pertenece
+    public function employee_type()
+    { // Accede al tipo de empleado al que pertenece
         return $this->belongsTo(EmployeeType::class);
     }
-    public function insurer_entity(){ // Accede a la entidad aseguradora al que pertenece
+    public function insurer_entity()
+    { // Accede a la entidad aseguradora al que pertenece
         return $this->belongsTo(InsurerEntity::class);
     }
-    public function person(){ // Accede a la información de la persona al que pertenece
+    public function person()
+    { // Accede a la información de la persona al que pertenece
         return $this->belongsTo(Person::class);
     }
-    public function supervisor(){ // Accede a la información del supervisor asignado
+    public function supervisor()
+    { // Accede a la información del supervisor asignado
         return $this->belongsTo(Person::class, 'supervisor_id');
     }
     public function areaAssignments()
-{
-    return $this->hasMany(PersonAreaBudgetAssignment::class);
-}
+    {
+        return $this->hasMany(PersonAreaBudgetAssignment::class);
+    }
+    public function contractDetail()
+    {
+        return $this->hasOne(\Modules\GTH\Entities\ContractDetail::class, 'contractor_id');
+    }
 
+    // Contractor.php
+    public function warehouse()
+    {
+        return $this->belongsTo(\Modules\SICA\Entities\Warehouse::class, 'warehouse_id');
+    }
 }

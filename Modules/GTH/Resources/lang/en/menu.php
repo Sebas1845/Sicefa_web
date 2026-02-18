@@ -49,15 +49,57 @@ return [
 	 'Employment Contract' => 'Employment Contract',
 	 'Contract Report' => 'Contract Report',
 	 'Contract Certificate' => 'Contract Certificate',
+
+
+
+
+	 //pasantes
+	 'Interns' => 'Interns',
 	 'Configuration' => 'Configuration',
 	 'Type of Contract' => 'Type of Contract',
 	 'Type of Employee' => 'Type of Employee',
 	 'Insurance Company' => 'Insurance Company',
 	 'Pension' => 'Pension',
-	 'Grades' => 'Grades',
+	 'Grades' => 'Grades', 
 	 'Officials' => 'Officials',
-	 
+	 'title' => 'Contractual Certificate',
+	 'Document Number' => 'Document Number',
+	 'Enter Document Number' => 'Enter Document Number',
 	 '' => '',
+
+	//certificados contractuales
+		'Contractor Naeme' => 'Contractor Name',
+		'Start Date' => 'Start Date',
+		'End Date' => 'End Date',
+		'End Date' => 'End Date',
+		'Total Value' => 'Total Value',
+		'Actions' => 'Actions',
+		'Generate Certificate' => 'Generate Certificate',
+		'Search Results' => 'Search Results',
+		'Contractual Certificate' => 'Contractual Certificate',	
+		'Search Contractual Certificate' => 'Search Contractual Certificate',
+		'Enter the ID number' => 'Enter the ID number',	
+		'Search' => 'Search',
+		'Payment Method' => 'Forma de Pago',
+    'Payment Type' => 'Payment Type',
+	'Monthly' => 'Monthly',
+	'Hourly' => 'Hourly',
+	'Monthly Payment Amount' => 'Monthly Payment Amount',
+	'Value per Hour' => 'Value per Hour',
+	'Enter the monthly payment amount' => 'Enter the monthly payment amount',
+	'Enter the value per hour' => 'Enter the value per hour',
+	'Close' => 'Close',
+
+	
+
+
+
+
+
+
+
+
+
 
 
 	//contractors
@@ -72,7 +114,7 @@ return [
 
 	'Edit Contract' => 'Edit Contract',
 	'Contract Number' => 'Contract Number',
-	'Contract Year:' => 'Contract Year:',
+	'Contract Date:' => 'Contract Date:',
 	'Contract Start Date:' => 'Contract Start Date:',
 	'Contract End Date:' => 'Contract End Date:',
 	'Type of Contract:' => 'Type of Contract::',
@@ -115,6 +157,63 @@ return [
 	'Error' => 'Error',
 	'Error' => 'Error',
 
+//generalcontract
+	'General Contract Management' => 'General Contract Management',
+	'Create Employment Contract' => 'Create Employment Contract',
+	'List of Employment Contracts' => 'List of Employment Contracts',
+	'Add Employment Contract' => 'Add Employment Contract',
+	//general
+	'welcome to the employment contract page. Here you can manage the employment contracts of contractors.' => 'welcome to the employment contract page. Here you can manage the employment contracts of contractors.',
+	'no_data' => 'No data available in the table',
+	'Showing _START_ to _END_ of _TOTAL_ entries' => 'Showing _START_ to _END_ of _TOTAL_ entries',
+	'Showing 0 to 0 of 0 entries' => 'Showing 0 to 0 of 0 entries',
+	'Filtered from _MAX_ total entries' => 'Filtered from _MAX_ total entries',
+	'First' => 'First',
+
+	'Last' => 'Last',
+	'Next' => 'Next',
+	'Previous' => 'Previous',	
+	'Search:' => 'Search:',
+	'Show _MENU_ entries' => 'Show _MENU_ entries',
+	'Request Certificate' => 'Request Certificate',
+
+	'Request Certificate' => 'Request Certificate',
+
+// Traducciones para solicitud de certificados
+'certificate_request_title' => 'Solicitar Certificado Contractual',
+'certificate_document_number' => 'Número de Documento',
+'certificate_document_placeholder' => 'Ingrese su número de documento',
+'certificate_submit_button' => 'Solicitar Certificado',
+'certificate_description' => 'Ingresa tu número de documento para solicitar tu certificado contractual.',
+'certificate_info_message' => 'Recibirás respuesta en un plazo máximo de 48 horas hábiles.',
+
+// Validaciones
+'certificate_validation_document_required' => 'El número de documento es obligatorio',
+'certificate_validation_document_numeric' => 'El número de documento debe ser numérico',
+'certificate_validation_document_exists' => 'No se encontró ninguna persona con este documento',
+
+// Mensajes de éxito
+'certificate_success_request_sent' => 'Tu solicitud ha sido enviada exitosamente. El área de Talento Humano te contactará pronto.',
+
+// Mensajes de advertencia
+'certificate_warning_no_contracts' => 'No se encontraron contratos asociados a este documento. Por favor, verifica con Talento Humano.',
+
+// Mensajes de error
+'certificate_error_process_failed' => 'Error al procesar tu solicitud. Por favor, intenta nuevamente.',
+'certificate_error_person_not_found' => 'No se encontró ninguna persona con ese número de documento.',
+
+// Email
+'certificate_email_subject' => 'Nueva Solicitud de Certificado Contractual',
+'certificate_email_greeting' => 'Nueva Solicitud de Certificado',
+'certificate_email_applicant' => 'Solicitante',
+'certificate_email_document' => 'Documento',
+'certificate_email_address' => 'Correo Electrónico',
+'certificate_email_phone' => 'Teléfono',
+'certificate_email_contracts_found' => 'Contratos Encontrados',
+'certificate_email_footer' => 'Sistema de Gestión del Talento Humano - SENA',
+
+
+
 	//Contratreporst
 	'Employment Contract Record' => 'Registration of Contract for the Provision of Services',
 	'Personal Information' => 'Contractor Information',
@@ -128,7 +227,7 @@ return [
 	'Enter the supervisor ID' => 'Enter the supervisor ID',
 	'Contract Number:' => 'Contract Number:',
 	'Enter the contract number' => 'Enter the contract number',
-	'Contract Year:' => 'Contract Year:',
+	'Contract Date:' => 'Contract Date:',
 	'Contract Start Date:' => 'Contract Start Date:',
 	'Contract End Date:' => 'Contract End Date:',
 	'Type of Contract:' => 'Type of Contract:',

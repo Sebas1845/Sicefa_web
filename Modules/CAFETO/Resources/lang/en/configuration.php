@@ -2,17 +2,17 @@
 
 return [
     // Breadcrumbs
-	'Breadcrumb_Active_Configuration' => 'Configuration',
+    'Breadcrumb_Active_Configuration' => 'Configuration',
 
     // Card Generate Ticket Test
-    'Title_Card_Ticket' => 'Generate a test ticket',
-    'Text_Card_Ticket'  => 'Here you will be able to generate the test invoice to verify if the printer is connected and working properly, this will be used for the creation of the sales ticket and the inventory receipt ticket.',
+    'Title_Card_Ticket' => 'Generate Test Receipt',
+    'Text_Card_Ticket'  => 'Here you can generate a test receipt to verify if the printer is connected and working correctly. This will be used for creating the sales invoice and the inventory receipt.',
     
     // Buttons
-    'Btn_Generate_Ticket'  => 'Generate Ticket',
-    
-    //Sweetalerts
-    'title'  => 'Printer Error!',
-    'text'  => 'An error occurred while printing. Make sure the printer POS-80C is connected and configured.',
+    'Btn_Generate_Ticket'  => 'Generate Receipt',
 
+    // Sweetalerts
+    'title'  => 'Printing Error!',
+    'text'  => 'An error occurred during the printing process. Ensure that the POS-80C printer is connected and configured.',
 ];
+?>

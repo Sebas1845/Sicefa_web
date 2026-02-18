@@ -5,7 +5,16 @@
 @section('stylesheet')
 @show
 
+<head>
+    
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+
+
 <body class="hold-transition sidebar-mini layout-fixed">
+    
 
     <div class="wrapper">
         <!-- Navbar -->

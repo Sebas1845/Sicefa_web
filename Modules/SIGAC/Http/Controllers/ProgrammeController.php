@@ -61,6 +61,7 @@ use Modules\SICA\Entities\PensionEntity;
 use hasRole;
 use App\Mail\SIGAC\ProgramRequest\ProgramRequestStatusMail;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\ValidationException;
 
 
 
@@ -1306,7 +1307,13 @@ class ProgrammeController extends Controller
         $user = auth()->user();
         if (!$user) abort(403);
 
-        $roleRoute = getRoleRouteName(\Illuminate\Support\Facades\Route::currentRouteName()); // instructor | academic_coordination | campesena | support | etc
+        $roleRoute = getRoleRouteName(\Illuminate\Support\Facades\Route::currentRouteName()); // instructor|academic_coordination|campesena|support|etc
+
+        // Roles base
+        $isInstructor = function_exists('checkRol') ? checkRol('sigac.instructor') : false;
+        $isCoordAcad  = function_exists('checkRol') ? (checkRol('sigac.academic_coordinator') || checkRol('superadmin')) : false;
+        $isCampesena  = function_exists('checkRol') ? checkRol('sigac.campesena') : false;
+        $isSupport    = function_exists('checkRol') ? (checkRol('gdf.academic_support') || checkRol('gdf.campesena_support')) : false;
 
         $query = ProgramRequest::query()
             ->with([
@@ -1315,44 +1322,77 @@ class ProgrammeController extends Controller
                 'special_program',
                 'municipality.department',
                 'village',
-                'dates',      // IMPORTANTE: usa SIEMPRE "dates" (relación)
-                'documents',
+                'dates',       // ✅ relación correcta
+                'documents',   // ✅ relación correcta
                 'area',
                 'budgetItem',
             ]);
 
-        // Filtro opcional por estado (por query ?state=Pendiente etc)
-        if ($request->filled('state')) {
-            $query->where('state', $request->get('state'));
+        // =========================
+        // Filtros opcionales
+        // =========================
+        $state = trim((string) $request->get('state', ''));
+        if ($state !== '') {
+            $query->where('state', $state);
         }
 
-        // Filtro opcional por área (si lo mandas desde la vista)
-        $area_id = (int) $request->input('area_id');
+        $area_id = (int) $request->input('area_id', 0);
         if ($area_id > 0) {
             $query->where('area_id', $area_id);
         }
 
-        // Instructor: solo sus solicitudes (todas)
-        if (checkRol('sigac.instructor')) {
+        // =========================
+        // Scope por rol
+        // =========================
+
+        // 1) Instructor: SOLO sus solicitudes (todas)
+        if ($isInstructor) {
             $query->where('person_id', $user->person_id);
         }
-        // Coordinador académico: solo área 2 (por defecto ver Pendiente si no mandan state)
-        elseif (checkRol('sigac.academic_coordinator') || checkRol('superadmin')) {
+
+        // 2) Coordinación Académica: SOLO área 2
+        elseif ($isCoordAcad) {
             $query->where('area_id', 2);
-            if (!$request->filled('state')) {
-                $query->where('state', 'Pendiente');
+
+            // ✅ Importante: si NO envían state, mostrar también Preconfirmado
+            // para que, al aprobar, pueda caracterizar desde la misma bandeja.
+            if ($state === '') {
+                $query->whereIn('state', ['Pendiente', 'Preconfirmado']);
             }
         }
-        // Campesena coordinador: área 1 (si lo estás usando en SIGAC)
-        elseif (checkRol('sigac.campesena')) {
+
+        // 3) Campesena: SOLO área 1
+        elseif ($isCampesena) {
             $query->where('area_id', 1);
-            if (!$request->filled('state')) {
-                $query->where('state', 'Pendiente');
+
+            // ✅ Igual que coordinación
+            if ($state === '') {
+                $query->whereIn('state', ['Pendiente', 'Preconfirmado']);
             }
+        }
+
+        // 4) Apoyo (si también quieres que vea bandeja general)
+        //    - si NO quieres que Apoyo use esta tabla, quita este bloque y deja 403.
+        elseif ($isSupport) {
+            // Apoyo puede ver Preconfirmadas (y opcionalmente Devueltas)
+            if ($state === '') {
+                $query->whereIn('state', ['Preconfirmado']);
+            } else {
+                // si mandan state=..., lo respetamos (ya lo filtró arriba)
+            }
+
+            // Opcional: filtrar por áreas del apoyo
+            $areas = [];
+            if (checkRol('gdf.campesena_support')) $areas[] = 1;
+            if (checkRol('gdf.academic_support'))  $areas[] = 2;
+            if (!empty($areas)) $query->whereIn('area_id', $areas);
         } else {
             abort(403);
         }
 
+        // =========================
+        // Listado
+        // =========================
         $program_requests = $query->orderByDesc('id')->get();
 
         $titlePage = 'Solicitudes de Programación';
@@ -1365,49 +1405,6 @@ class ProgrammeController extends Controller
             'roleRoute'
         ));
     }
-
-    public function program_request_document_download($documentId)
-    {
-        try {
-            // Permisos (ajusta a tu necesidad real)
-            if (!function_exists('checkRol') || !(
-                checkRol('gdf.academic_support') ||
-                checkRol('gdf.campesena_support') ||
-                checkRol('sigac.academic_coordinator') ||
-                checkRol('sigac.campesena') ||
-                checkRol('superadmin')
-            )) {
-                abort(403, 'No tienes permisos para descargar este documento.');
-            }
-
-            $document = ProgramRequestDocument::findOrFail($documentId);
-
-            $path = $document->path; // relativo en disco public
-            if (!$path || !Storage::disk('public')->exists($path)) {
-                return back()->with('error', 'El archivo no existe o fue eliminado.');
-            }
-
-            $filename = $document->name ?: basename($path);
-
-            return Storage::disk('public')->download($path, $filename);
-        } catch (\Throwable $e) {
-            Log::error('Error descargando documento individual', [
-                'document_id' => $documentId,
-                'error' => $e->getMessage(),
-            ]);
-
-            return back()->with('error', 'No fue posible descargar el documento.');
-        }
-    }
-
-
-
-
-
-
-
-
-
 
 
     // Buscar instructor
@@ -1567,7 +1564,7 @@ class ProgrammeController extends Controller
 
     public function program_request_document_store(Request $request, $id)
     {
-        // Permisos (ajusta a tu necesidad real)
+        // 0) Permisos (ajusta si quieres)
         if (!function_exists('checkRol') || !(
             checkRol('sigac.instructor') ||
             checkRol('sigac.academic_coordinator') ||
@@ -1579,144 +1576,100 @@ class ProgrammeController extends Controller
             abort(403);
         }
 
-        // Validación
+        // 1) Cargar solicitud
+        $pr = ProgramRequest::with('documents')->findOrFail($id);
+
+        // Instructor solo puede subir a lo suyo
+        if (function_exists('checkRol') && checkRol('sigac.instructor')) {
+            $personId = (int) optional(auth()->user()->person)->id;
+            if (!$personId || (int)$pr->person_id !== $personId) abort(403);
+        }
+
+        // 2) Validación
+        // IMPORTANTE: documents puede venir como array o como file único.
         $request->validate([
-            'documents'   => 'required',
-            'documents.*' => 'file|max:10240', // 10MB
+            'documents'   => ['required'],
+            'documents.*' => ['file', 'max:10240', 'mimes:pdf,jpg,jpeg,png'], // 10MB
+        ], [
+            'documents.required' => 'Debes adjuntar al menos un archivo.',
         ]);
+
+        // 3) Verificar que realmente llegaron archivos
+        if (!$request->hasFile('documents')) {
+            return back()->with('error', 'No se recibió ningún archivo. Revisa que el formulario tenga enctype="multipart/form-data" y que el input se llame documents[].');
+        }
 
         DB::beginTransaction();
         try {
-            $pr = ProgramRequest::findOrFail($id);
-
             $files = $request->file('documents');
+
+            // Normalizar: si llega 1 archivo, lo convertimos a array
             if (!is_array($files)) $files = [$files];
 
-            if (count($files) === 0) {
-                DB::rollBack();
-                return back()->with('error', 'No se recibieron archivos.');
-            }
+            $baseDir = "sigac/program_requests/{$pr->id}/documents";
 
-            $baseDir = "sigac/program_request/{$pr->id}/documentos";
+            $saved = 0;
 
             foreach ($files as $file) {
                 if (!$file || !$file->isValid()) {
-                    DB::rollBack();
-                    return back()->with('error', 'Uno de los archivos no es válido.');
+                    Log::warning('SIGAC upload invalid file', [
+                        'program_request_id' => $pr->id,
+                        'error' => $file?->getError(),
+                        'error_msg' => $file?->getErrorMessage(),
+                    ]);
+                    continue;
                 }
 
-                // Nombre seguro
                 $original = $file->getClientOriginalName();
-                $original = preg_replace('/[^\pL\pN\.\-\_\s]/u', '', $original);
-                $original = preg_replace('/\s+/', '_', $original);
-                $filename = time() . '_' . Str::random(6) . '_' . $original;
 
-                // Guardar en disco public -> storage/app/public/...
+                // Nombre seguro
+                $safeBase = Str::slug(pathinfo($original, PATHINFO_FILENAME));
+                $ext      = strtolower($file->getClientOriginalExtension());
+                $filename = $safeBase . '-' . now()->format('Ymd_His') . '-' . Str::random(6) . '.' . $ext;
+
+                // Guardar en disco public (storage/app/public/...)
                 $path = $file->storeAs($baseDir, $filename, 'public');
 
+                if (!$path) {
+                    Log::error('SIGAC storeAs returned null', [
+                        'program_request_id' => $pr->id,
+                        'original' => $original,
+                        'disk' => 'public',
+                        'baseDir' => $baseDir
+                    ]);
+                    continue;
+                }
+
+                // Registrar en BD (esto es CLAVE para que luego aparezca en tabla)
                 ProgramRequestDocument::create([
                     'program_request_id' => $pr->id,
-                    'name'               => $original,
-                    'path'               => $path, // ej: sigac/program_request/15/documentos/xxx.pdf
+                    'name' => $original,
+                    'path' => $path, // relativo al disk public
                 ]);
+
+                $saved++;
             }
 
-            // (Opcional) devolver a Pendiente si quieres que al adjuntar vuelva a bandeja
-            // $pr->state = 'Pendiente';
-            // $pr->save();
+            if ($saved === 0) {
+                DB::rollBack();
+                return back()->with('error', 'No se pudo guardar ningún archivo. Revisa logs y permisos del storage.');
+            }
 
             DB::commit();
 
-            return back()->with('success', 'Se agregaron los archivos correctamente.');
+            return back()->with('success', "Listo. Se guardaron {$saved} archivo(s).");
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('program_request_document_store error', [
+            Log::error('program_request_document_store exception', [
                 'program_request_id' => $id,
                 'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
             ]);
-
             return back()->with('error', 'Error subiendo documentos: ' . $e->getMessage());
         }
     }
 
-
-    public function program_request_download($id)
-    {
-        try {
-            // Permisos (ajusta a tu necesidad real)
-            if (!function_exists('checkRol') || !(
-                checkRol('gdf.academic_support') ||
-                checkRol('gdf.campesena_support') ||
-                checkRol('sigac.academic_coordinator') ||
-                checkRol('sigac.campesena') ||
-                checkRol('superadmin')
-            )) {
-                abort(403);
-            }
-
-            $pr = ProgramRequest::with('documents')->findOrFail($id);
-
-            $docs = $pr->documents ?? collect();
-            if ($docs->isEmpty()) {
-                return back()->with('error', 'Esta solicitud no tiene documentos cargados.');
-            }
-
-            // Carpeta temporal dentro de storage/app/tmp
-            $tmpDir = 'tmp';
-            Storage::makeDirectory($tmpDir);
-
-            $zipName = 'program_request_' . $pr->id . '_' . Str::random(8) . '.zip';
-            $zipRelPath = $tmpDir . '/' . $zipName;
-            $zipAbsPath = storage_path('app/' . $zipRelPath);
-
-            $zip = new ZipArchive();
-            if ($zip->open($zipAbsPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-                return back()->with('error', 'No se pudo crear el ZIP.');
-            }
-
-            $added = 0;
-
-            foreach ($docs as $doc) {
-                $relPath = $doc->path; // relativo a disk('public')
-                if (!$relPath || !Storage::disk('public')->exists($relPath)) {
-                    continue;
-                }
-
-                $absPath = Storage::disk('public')->path($relPath);
-                if (!is_file($absPath)) {
-                    continue;
-                }
-
-                $nameInZip = $doc->name ?: basename($relPath);
-
-                // Evitar colisiones de nombres dentro del ZIP
-                if ($zip->locateName($nameInZip) !== false) {
-                    $nameInZip = pathinfo($nameInZip, PATHINFO_FILENAME)
-                        . '_' . Str::random(4)
-                        . '.' . pathinfo($nameInZip, PATHINFO_EXTENSION);
-                }
-
-                $zip->addFile($absPath, $nameInZip);
-                $added++;
-            }
-
-            $zip->close();
-
-            if ($added === 0 || !file_exists($zipAbsPath)) {
-                @unlink($zipAbsPath);
-                return back()->with('error', 'No se generó el ZIP (no hay archivos válidos para empaquetar).');
-            }
-
-            return response()->download($zipAbsPath)->deleteFileAfterSend(true);
-        } catch (\Throwable $e) {
-            Log::error('program_request_download zip error', [
-                'program_request_id' => $id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return back()->with('error', 'No fue posible generar el ZIP: ' . $e->getMessage());
-        }
-    }
 
 
     public function program_request_approve($id)
@@ -1741,24 +1694,41 @@ class ProgrammeController extends Controller
     // Caracterizar programa
     public function program_request_confirmation(Request $request, $id)
     {
+        DB::beginTransaction();
         try {
-            // Confirmar solicitud
-            $program_request = ProgramRequest::find($id);
+            $program_request = ProgramRequest::findOrFail($id);
+
+            // Si ya no está pendiente, evita reprocesos
+            if ($program_request->state !== 'Pendiente') {
+                DB::rollBack();
+                return back()->with('warning', 'La solicitud ya no está en estado Pendiente.');
+            }
+
             $program_request->state = 'Preconfirmado';
             $program_request->save();
 
             DB::commit();
+
             if (Route::is('sigac.campesena.*')) {
-                return redirect()->route('sigac.campesena.programming.program_request.characterization.index')->with('success', 'Solicitud Confirmada');
+                return redirect()
+                    ->route('sigac.campesena.programming.program_request.characterization.index')
+                    ->with('success', 'Solicitud Confirmada');
             }
-            return redirect()->route('sigac.academic_coordination.programming.program_request.characterization.index')->with('success', 'Solicitud Confirmada');
-        } catch (\Exception $e) {
-            dd($e);
+
+            return redirect()
+                ->route('sigac.academic_coordination.programming.program_request.characterization.index')
+                ->with('success', 'Solicitud Confirmada');
+        } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('Error en el registro: ' . $e->getMessage());
-            return response()->json(['error' => 'Error interno del servidor', $e], 500);
+            Log::error('program_request_confirmation error', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+            return back()->with('error', 'Error confirmando: ' . $e->getMessage());
         }
     }
+
+
     public function program_request_dismiss(Request $request, $id)
     {
         $request->validate([
@@ -1767,6 +1737,7 @@ class ProgrammeController extends Controller
 
         DB::beginTransaction();
         try {
+            // 🔴 IMPORTANTE: cargar SIEMPRE 'dates'
             $pr = ProgramRequest::with(['person', 'dates'])->findOrFail($id);
 
             $pr->observation = $request->observation;
@@ -1775,7 +1746,12 @@ class ProgrammeController extends Controller
 
             DB::commit();
 
-            $this->notifyProgramRequest($pr, 'dismissed', $pr->observation);
+            // 📧 Correo (incluye fechas)
+            $this->notifyProgramRequest(
+                $pr,
+                'dismissed',
+                $pr->observation
+            );
 
             return back()->with('success', 'Solicitud desestimada y notificada por correo.');
         } catch (\Throwable $e) {
@@ -1783,33 +1759,25 @@ class ProgrammeController extends Controller
             return back()->with('error', 'Error al desestimar: ' . $e->getMessage());
         }
     }
-    public function downloadApprenticesTemplate()
-    {
-        $rel = 'templates/sigac/plantilla_cargue_aprendices.xlsx';
-
-        if (!\Storage::exists($rel)) {
-            abort(404, 'No existe la plantilla.');
-        }
-
-        return \Storage::download($rel, 'plantilla_cargue_aprendices.xlsx');
-    }
 
 
 
-    // Caracterizar programa
+
     public function program_request_characterization_store(Request $request, $id)
     {
         try {
             DB::beginTransaction();
 
-            $program_request = ProgramRequest::with(['program_request_dates', 'person'])->findOrFail($id);
-            $dates = $program_request->program_request_dates ?? collect();
+            // 🔴 IMPORTANTE: cargar SIEMPRE 'dates'
+            $program_request = ProgramRequest::with(['dates', 'person', 'program'])->findOrFail($id);
+            $dates = $program_request->dates ?? collect();
 
             if ($dates->isEmpty()) {
                 DB::rollBack();
                 return back()->with('error', 'No se puede caracterizar: la solicitud no tiene fechas registradas.');
             }
 
+            // Inicio/fin desde fechas reales
             $startDate = optional($dates->sortBy('date')->first())->date;
             $endDate   = optional($dates->sortByDesc('date')->first())->date;
 
@@ -1818,11 +1786,12 @@ class ProgrammeController extends Controller
                 return back()->with('error', 'No se pudo determinar fecha inicio/fin desde las fechas registradas.');
             }
 
-            $code_course  = trim((string) $request->input('code_course'));
-            $code_empresa = trim((string) $request->input('code_empresa'));
-            $date_inscription = $request->input('date_inscription');
+            $code_course       = trim((string) $request->input('code_course'));
+            $code_empresa      = trim((string) $request->input('code_empresa'));
+            $date_inscription  = $request->input('date_inscription');
             $date_characterization = Carbon::now()->toDateString();
 
+            // Si no envían ficha, generar una
             if ($code_course === '') {
                 $code_course = 'CUR-' . $program_request->id . '-' . Carbon::now()->format('Ymd') . '-' . Str::upper(Str::random(4));
             }
@@ -1832,7 +1801,7 @@ class ProgrammeController extends Controller
             $program_request->code_empresa          = $code_empresa;
             $program_request->code_course           = $code_course;
             $program_request->date_characterization = $date_characterization;
-            $program_request->state = 'Confirmado';
+            $program_request->state                 = 'Confirmado';
 
             // Si tu tabla tiene start/end
             if (\Schema::hasColumn('program_requests', 'start_date')) $program_request->start_date = $startDate;
@@ -1853,19 +1822,16 @@ class ProgrammeController extends Controller
                 $course->municipality_id = $program_request->municipality_id;
                 $course->save();
             } else {
-                // (Opcional) mantener coherencia por si el course existía sin datos completos
-                $course->program_id = $course->program_id ?: $program_request->program_id;
+                // (Opcional) sincroniza para coherencia
+                $course->program_id      = $course->program_id ?: $program_request->program_id;
                 $course->municipality_id = $course->municipality_id ?: $program_request->municipality_id;
-
-                // Si quieres que SIEMPRE se sincronice:
-                $course->start_date = $startDate;
-                $course->end_date   = $endDate;
-
+                $course->start_date      = $startDate;
+                $course->end_date        = $endDate;
                 if (empty($course->status)) $course->status = 'Activo';
                 $course->save();
             }
 
-            // 3) Crear instructor_program por cada fecha, pero sin duplicar (upsert)
+            // 3) Crear instructor_program por cada fecha (sin duplicar)
             foreach ($dates as $d) {
                 $ip = InstructorProgram::where('course_id', $course->id)
                     ->whereDate('date', $d->date)
@@ -1883,7 +1849,6 @@ class ProgrammeController extends Controller
                     $ip->modality   = 'Complementaria';
                     $ip->save();
                 } else {
-                    // si existía, asegurar estado
                     if ($ip->state !== 'Programado') {
                         $ip->state = 'Programado';
                         $ip->save();
@@ -1900,18 +1865,30 @@ class ProgrammeController extends Controller
             // 4) Antes del import: contar aprendices actuales del curso
             $beforeCount = Apprentice::where('course_id', $course->id)->count();
 
-            // 5) Import masivo (si existe documento)
+            // 5) Buscar doc de cargue masivo (el nombre guardado suele ser "Cargue Masivo - original.xlsx")
             $bulkDoc = ProgramRequestDocument::where('program_request_id', $program_request->id)
-                ->where('name', 'like', '%CARGUE_MASIVO%')
+                ->where(function ($q) {
+                    $q->where('name', 'like', '%Cargue Masivo%')
+                        ->orWhere('name', 'like', '%cargue masivo%')
+                        ->orWhere('name', 'like', '%CARGUE MASIVO%');
+                })
                 ->orderByDesc('id')
                 ->first();
 
             $imported = false;
             if ($bulkDoc) {
-                $filePath = storage_path('app/' . $bulkDoc->path);
-                if (file_exists($filePath)) {
+                // 🔴 IMPORTANTE: el doc está en disk public
+                $filePath = Storage::disk('public')->path($bulkDoc->path);
+
+                if (is_file($filePath)) {
                     $this->importApprenticesExcelToCourse($filePath, $course->id);
                     $imported = true;
+                } else {
+                    Log::warning('Cargue masivo no existe en ruta', [
+                        'pr_id' => $program_request->id,
+                        'path' => $bulkDoc->path,
+                        'abs' => $filePath
+                    ]);
                 }
             }
 
@@ -1920,11 +1897,16 @@ class ProgrammeController extends Controller
 
             DB::commit();
 
+            // ✅ Enviar correo a instructor + solicitante (con fechas, conteo y link público)
+            $this->notifyProgramRequest($program_request, 'confirmed', null, [
+                'apprentices_count' => $afterCount,
+                'course_code'       => $course->code,
+            ]);
+
             $msg = $afterCount > 0
                 ? "Caracterización confirmada. Curso {$course->code}: {$afterCount} aprendices registrados."
                 : "Caracterización confirmada. Curso {$course->code}: no tiene aprendices registrados.";
 
-            // Si se importó, agrega delta
             if ($imported) {
                 $delta = $afterCount - $beforeCount;
                 $msg .= " (Import: " . ($delta >= 0 ? "+{$delta}" : (string)$delta) . ")";
@@ -1935,9 +1917,14 @@ class ProgrammeController extends Controller
                 ->with('success', $msg);
         } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('program_request_characterization_store error', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
             return back()->with('error', 'Error en caracterización: ' . $e->getMessage());
         }
     }
+
 
 
     // Devolver solicitud
@@ -2013,26 +2000,34 @@ class ProgrammeController extends Controller
             'observation' => 'required|string|max:5000',
         ]);
 
+        DB::beginTransaction();
         try {
-            DB::beginTransaction();
-
-            $program_request = ProgramRequest::with(['person', 'program_request_dates'])->findOrFail($id);
+            // 🔴 IMPORTANTE: usa 'dates', NO 'program_request_dates'
+            $program_request = ProgramRequest::with(['person', 'dates'])->findOrFail($id);
 
             $program_request->observation = $request->input('observation');
-            $program_request->state = 'Devuelto'; // <<<<<< CAMBIO
+            $program_request->state = 'Devuelto';
             $program_request->save();
 
             DB::commit();
 
-            // Correo a solicitante e instructor
-            $this->notifyProgramRequest($program_request, 'returned', $program_request->observation);
+            // 📧 Correo a instructor y solicitante (con fechas)
+            $this->notifyProgramRequest(
+                $program_request,
+                'returned',
+                $program_request->observation
+            );
 
             return redirect()
                 ->route('sigac.support.programming.program_request.characterization.index')
                 ->with('success', 'Solicitud devuelta y notificada por correo.');
         } catch (\Throwable $e) {
             DB::rollBack();
-            \Log::error('Error devolviendo solicitud: ' . $e->getMessage());
+            \Log::error('Error devolviendo solicitud', [
+                'program_request_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
             return back()->with('error', 'Error interno: ' . $e->getMessage());
         }
     }
@@ -2254,42 +2249,6 @@ class ProgrammeController extends Controller
         return redirect()->route('sigac.academic_coordination.programming.external_activities.index')->with('success', 'Actividad externa no aprobada exitosamente')->with('typealert', 'success');
     }
 
-    /* ============================
-    |  HELPERS (privados)
-    |============================ */
-
-    private function getEffectiveInstructorId(Request $request): int
-    {
-        // Coordinación puede escoger instructor; instructor normal es el logueado
-        if (checkRol('sigac.academic_coordinator') || checkRol('superadmin')) {
-            return (int) $request->input('instructor');
-        }
-        return (int) auth()->user()->person->id;
-    }
-
-    private function instructorIsActive(int $personId): bool
-    {
-        $employee = DB::table('employees')
-            ->join('employee_types', 'employees.employee_type_id', '=', 'employee_types.id')
-            ->where('employees.person_id', $personId)
-            ->where('employees.state', 'Activo')
-            ->where('employee_types.name', 'Instructor')
-            ->exists();
-
-        if ($employee) return true;
-
-        return DB::table('contractors')
-            ->join('employee_types', 'contractors.employee_type_id', '=', 'employee_types.id')
-            ->where('contractors.person_id', $personId)
-            ->where('contractors.state', 'Activo')
-            ->where('employee_types.name', 'Instructor')
-            ->exists();
-    }
-
-    /**
-     * TODO: cuando me pases la BD, aquí conectamos la tabla real.
-     * Por ahora: si es campesena, exigimos que el instructor esté habilitado para ese scope.
-     */
     private function instructorBelongsToArea(int $personId, string $areaKey): bool
     {
         $areaId = $areaKey === 'campesena' ? 1 : 2; // ajusta si cambia
@@ -2307,15 +2266,6 @@ class ProgrammeController extends Controller
         return Department::where('name', 'Huila')->value('id');
     }
 
-    private function municipalityIsHuila(int $municipalityId): bool
-    {
-        $huilaId = $this->huilaDepartmentId();
-        if (!$huilaId) return false;
-
-        return Municipality::where('id', $municipalityId)
-            ->where('department_id', $huilaId)
-            ->exists();
-    }
 
     private function allowedSpecialProgramsFor(string $areaKey, int $personId = null)
     {
@@ -2334,63 +2284,6 @@ class ProgrammeController extends Controller
         return $q->get();
     }
 
-    /**
-     * Programas permitidos por instructor
-     * Estrategia A: LearningOutcomePerson => Program
-     * Fallback: historial de InstructorProgramPerson => Course => Program
-     */
-    private function allowedProgramsForInstructor(int $personId)
-    {
-        // A) Por resultados de aprendizaje
-        $programIdsA = DB::table('learning_outcome_people as lop')
-            ->join('learning_outcomes as lo', 'lop.learning_outcome_id', '=', 'lo.id')
-            ->join('competencies as c', 'lo.competencie_id', '=', 'c.id')
-            ->where('lop.person_id', $personId)
-            ->distinct()
-            ->pluck('c.program_id');
-
-        if ($programIdsA->isNotEmpty()) {
-            return Program::whereIn('id', $programIdsA)->orderBy('name')->get();
-        }
-
-        // B) Fallback por historial de cursos
-        $programIdsB = DB::table('instructor_program_people as ipp')
-            ->join('instructor_programs as ip', 'ipp.instructor_program_id', '=', 'ip.id')
-            ->join('courses as co', 'ip.course_id', '=', 'co.id')
-            ->where('ipp.person_id', $personId)
-            ->distinct()
-            ->pluck('co.program_id');
-
-        return Program::whereIn('id', $programIdsB)->orderBy('name')->get();
-    }
-
-    /* ============================
-    |  MODIFICAR: program_request_index()
-    |============================ */
-
-
-
-
-
-    /* ============================
-    |  NUEVO: AJAX programas por instructor
-    |============================ */
-    public function program_request_programs_for_instructor(Request $request)
-    {
-        $q = trim((string) $request->get('q', ''));
-        $area = $request->get('area'); // si aplica
-
-        // Ajusta a tu modelo real:
-        $rows = Program::query()
-            ->when($q !== '', fn($qq) => $qq->where('name', 'like', "%{$q}%"))
-            ->orderBy('name')
-            ->limit(20)
-            ->get(['id', 'name']);
-
-        return response()->json([
-            'results' => $rows->map(fn($r) => ['id' => $r->id, 'text' => $r->name]),
-        ]);
-    }
 
     public function program_request_searchmunicipalities(Request $request)
     {
@@ -2408,41 +2301,13 @@ class ProgrammeController extends Controller
         ]);
     }
 
-    private function validateScheduleAgainstRange(array $schedule, string $start, string $end): void
-    {
-        $startDate = \Carbon\Carbon::createFromFormat('Y-m-d', $start)->startOfDay();
-        $endDate   = \Carbon\Carbon::createFromFormat('Y-m-d', $end)->endOfDay();
-
-        foreach ($schedule as $i => $row) {
-            $d = \Carbon\Carbon::createFromFormat('Y-m-d', $row['date'])->startOfDay();
-
-            if ($d->lt($startDate) || $d->gt($endDate)) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    "schedule.$i.date" => "La fecha del horario debe estar entre {$start} y {$end}.",
-                ]);
-            }
-
-            // horas
-            $ini = \Carbon\Carbon::createFromFormat('H:i', $row['start']);
-            $fin = \Carbon\Carbon::createFromFormat('H:i', $row['end']);
-
-            if ($fin->lte($ini)) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
-                    "schedule.$i.end" => "La hora fin debe ser mayor que la hora inicio.",
-                ]);
-            }
-        }
-    }
-
-
-
-
     /* ============================
     |  NUEVO: AJAX rubros/convenios por instructor + área
     |============================ */
     public function program_request_special_programs_for_instructor(Request $request)
     {
-        $areaKey = $this->areaKeyFromRoute();
+        $areaKey = $this->resolveAreaKeyFromRoute();
+
 
         $request->validate([
             'person_id' => ['required', 'integer', 'exists:people,id'],
@@ -2459,87 +2324,6 @@ class ProgrammeController extends Controller
             ->values();
 
         return response()->json(['special_programs' => $specialPrograms]);
-    }
-
-
-
-
-        /* ============================
-    |  MODIFICAR: program_request_store()
-    |============================ */
-
-
-
-    /**
-     * Detecta choques con programación existente del instructor.
-     * Usa instructor_programs + instructor_program_people.
-     */
-    private function instructorHasScheduleConflict(int $personId, string $date, string $startTime, string $endTime): bool
-    {
-        // Solape: NOT (fin <= inicio_existente OR inicio >= fin_existente)
-        // => (start < end_existente) AND (end > start_existente)
-        return DB::table('instructor_program_people as ipp')
-            ->join('instructor_programs as ip', 'ip.id', '=', 'ipp.instructor_program_id')
-            ->whereNull('ipp.deleted_at')
-            ->where('ipp.person_id', $personId)
-            ->whereDate('ip.date', $date)
-            ->where(function ($q) {
-                // Si manejas estados, evita contar cancelados
-                $q->whereNull('ip.state')->orWhere('ip.state', '!=', 'Cancelado');
-            })
-            ->whereRaw("TIME(?) < ip.end_time", [$startTime])
-            ->whereRaw("TIME(?) > ip.start_time", [$endTime])
-            ->exists();
-    }
-
-
-
-    /**
-     * Importa aprendices del Excel y los asocia a una solicitud (NO crea Course definitivo).
-     * Requiere tabla program_request_apprentices (o similar).
-     */
-    private function importApprenticesToProgramRequest($file, int $programRequestId): void
-    {
-        // Requiere maatwebsite/excel
-        $array = \Maatwebsite\Excel\Facades\Excel::toArray([], $file);
-        $rows  = $array[0] ?? [];
-
-        // Ajusta según formato real. Aquí asumo encabezado en primeras filas.
-        // Ejemplo: desde fila 1 si la fila 0 es encabezado.
-        $dataRows = array_slice($rows, 1);
-
-        foreach ($dataRows as $r) {
-            if (empty($r) || empty($r[0])) continue;
-
-            // AJUSTA columnas según tu plantilla:
-            // [0]=tipo_doc, [1]=documento, [2]=nombres, [3]=apellidos, [4]=telefono, [5]=email, [6]=estado
-            $doc = isset($r[1]) ? trim((string)$r[1]) : null;
-            if (!$doc) continue;
-
-            $fullName  = trim(($r[2] ?? '') . ' ' . ($r[3] ?? ''));
-            $email     = strtolower(trim((string)($r[5] ?? '')));
-            $telephone = trim((string)($r[4] ?? ''));
-            $status    = strtolower(trim((string)($r[6] ?? 'activo')));
-
-            // Si existe Person, asociar person_id (opcional)
-            $person = \Modules\SICA\Entities\Person::where('document_number', $doc)->first();
-
-            DB::table('program_request_apprentices')->updateOrInsert(
-                [
-                    'program_request_id' => $programRequestId,
-                    'document_number' => $doc,
-                ],
-                [
-                    'person_id' => $person?->id,
-                    'full_name' => $fullName ?: ($person ? trim($person->first_name . ' ' . $person->first_last_name . ' ' . $person->second_last_name) : null),
-                    'email'     => $email ?: ($person?->personal_email ?? $person?->misena_email ?? $person?->sena_email),
-                    'telephone' => $telephone ?: ($person?->telephone1),
-                    'status'    => $status ?: 'activo',
-                    'updated_at' => now(),
-                    'created_at' => now(),
-                ]
-            );
-        }
     }
 
     private function programsForInstructor(int $personId)
@@ -2580,38 +2364,40 @@ class ProgrammeController extends Controller
             'rubros'   => $this->budgetItemsForInstructorArea($personId, $areaId),
         ]);
     }
-    private function storeProgramRequestFile(Request $request, int $programRequestId, string $inputName, string $label): void
-    {
-        if (!$request->hasFile($inputName)) return;
 
-        $file = $request->file($inputName);
-        if (!$file || !$file->isValid()) return;
-
-        $path = $file->store('documents');
-
-        $doc = new ProgramRequestDocument();
-        $doc->program_request_id = $programRequestId;
-        $doc->name = $label . ' - ' . $file->getClientOriginalName();
-        $doc->path = $path;
-        $doc->save();
-    }
     private function importApprenticesExcelToCourse(string $filePath, int $courseId): void
     {
         $sheet = Excel::toArray([], $filePath);
-        $rows = $sheet[0] ?? [];
+        $rows  = $sheet[0] ?? [];
 
         // Ajusta según tu plantilla: en tu import usas datos desde fila 4
         $dataRows = array_slice($rows, 4);
 
-        $eps = EPS::firstOrCreate(['name' => 'NO REGISTRA']);
+        $eps              = EPS::firstOrCreate(['name' => 'NO REGISTRA']);
         $population_group = PopulationGroup::firstOrCreate(['name' => 'NINGUNA']);
-        $pension_entity = PensionEntity::firstOrCreate(['name' => 'NO REGISTRA']);
+        $pension_entity   = PensionEntity::firstOrCreate(['name' => 'NO REGISTRA']);
+
+        // ✅ Valores permitidos típicos para ENUM (ajusta si tu ENUM difiere)
+        $allowedEnum = [
+            'EN FORMACIÓN',
+            'CERTIFICADO',
+            'RETIRO VOLUNTARIO',
+            'CANCELADO',
+            'TRASLADADO',
+            'APLAZADO',
+            'INDUCCIÓN',
+            'CONDICIONADO',
+            'NO REGISTRA',
+        ];
 
         foreach ($dataRows as $r) {
-            // columnas típicas (según tu TempTablesController de apprentices):
             // [0]=tipo_doc, [1]=documento, [2]=nombres, [3]=apellidos, [4]=tel, [5]=email, [6]=estado
             $doc = isset($r[1]) ? trim((string)$r[1]) : '';
             if ($doc === '') continue;
+
+            // ✅ Si el doc trae puntos/espacios, límpialo
+            $docClean = preg_replace('/\D+/', '', $doc);
+            if (!$docClean) continue;
 
             $document_type_raw = strtoupper(trim((string)($r[0] ?? 'CC')));
             $document_type = match ($document_type_raw) {
@@ -2621,33 +2407,35 @@ class ProgrammeController extends Controller
                 default => 'Cédula de ciudadanía'
             };
 
-            $names = strtoupper(trim((string)($r[2] ?? '')));
-            $surnames = strtoupper(trim((string)($r[3] ?? '')));
-            $telephone = (string)($r[4] ?? '');
-            $email = strtolower(trim((string)($r[5] ?? '')));
-            $status = strtolower(trim((string)($r[6] ?? 'activo')));
+            $names     = strtoupper(trim((string)($r[2] ?? '')));
+            $surnames  = strtoupper(trim((string)($r[3] ?? '')));
+            $telephone = trim((string)($r[4] ?? ''));
+            $email     = strtolower(trim((string)($r[5] ?? '')));
+
+            // ✅ Estado crudo (puede venir vacío o mal)
+            $rawStatus = trim((string)($r[6] ?? ''));
 
             $surnameParts = preg_split('/\s+/', $surnames) ?: [];
-            $firstLast = $surnameParts[0] ?? '';
-            $secondLast = trim(str_replace($firstLast, '', $surnames));
+            $firstLast    = $surnameParts[0] ?? '';
+            $secondLast   = trim(str_replace($firstLast, '', $surnames));
 
             // email attribute
             $attribute = 'personal_email';
-            if (str_contains($email, '@misena')) $attribute = 'misena_email';
-            elseif (str_contains($email, '@sena')) $attribute = 'sena_email';
+            if ($email && str_contains($email, '@misena')) $attribute = 'misena_email';
+            elseif ($email && str_contains($email, '@sena')) $attribute = 'sena_email';
 
             $person = Person::firstOrCreate(
-                ['document_number' => (int)$doc],
+                ['document_number' => (int)$docClean],
                 [
-                    'document_type' => $document_type,
-                    'first_name' => $names ?: 'NO REGISTRA',
-                    'first_last_name' => $firstLast ?: 'NO REGISTRA',
-                    'second_last_name' => $secondLast ?: 'NO REGISTRA',
-                    'telephone1' => (int)($telephone ?: 0),
-                    $attribute => $email ?: null,
-                    'eps_id' => $eps->id,
-                    'population_group_id' => $population_group->id,
-                    'pension_entity_id' => $pension_entity->id,
+                    'document_type'         => $document_type,
+                    'first_name'            => $names ?: 'NO REGISTRA',
+                    'first_last_name'       => $firstLast ?: 'NO REGISTRA',
+                    'second_last_name'      => $secondLast ?: 'NO REGISTRA',
+                    'telephone1'            => (int)(preg_replace('/\D+/', '', $telephone) ?: 0),
+                    $attribute              => $email ?: null,
+                    'eps_id'                => $eps->id,
+                    'population_group_id'   => $population_group->id,
+                    'pension_entity_id'     => $pension_entity->id,
                 ]
             );
 
@@ -2656,16 +2444,75 @@ class ProgrammeController extends Controller
                 $person->{$attribute} = $email;
             }
             if ($telephone && empty($person->telephone1)) {
-                $person->telephone1 = (int)$telephone;
+                $person->telephone1 = (int)(preg_replace('/\D+/', '', $telephone) ?: 0);
             }
             $person->save();
 
+            // ✅ Normalizar y mapear estado a ENUM válido
+            $status = $this->normalizeApprenticeStatus($rawStatus, $allowedEnum);
+
             Apprentice::firstOrCreate(
                 ['person_id' => $person->id, 'course_id' => $courseId],
-                ['apprentice_status' => $status ?: 'activo']
+                ['apprentice_status' => $status]
             );
         }
     }
+
+
+    private function normalizeApprenticeStatus(string $rawStatus, array $allowedEnum): string
+    {
+        $raw = trim($rawStatus);
+
+        // si por error viene un email o algo con @
+        if ($raw === '' || str_contains($raw, '@')) {
+            return 'EN FORMACIÓN';
+        }
+
+        // normaliza sin tildes y en minúscula para comparar
+        $norm = mb_strtolower($raw);
+        $norm = str_replace(
+            ['á', 'é', 'í', 'ó', 'ú', 'ñ'],
+            ['a', 'e', 'i', 'o', 'u', 'n'],
+            $norm
+        );
+        $norm = preg_replace('/\s+/', ' ', trim($norm));
+
+        // mapeo de variantes comunes
+        $map = [
+            'activo'            => 'EN FORMACIÓN',
+            'en formacion'      => 'EN FORMACIÓN',
+            'en formación'      => 'EN FORMACIÓN',
+            'formacion'         => 'EN FORMACIÓN',
+            'formación'         => 'EN FORMACIÓN',
+            'certificado'       => 'CERTIFICADO',
+            'retirado'          => 'RETIRO VOLUNTARIO',
+            'retiro'            => 'RETIRO VOLUNTARIO',
+            'retiro voluntario' => 'RETIRO VOLUNTARIO',
+            'cancelado'         => 'CANCELADO',
+            'trasladado'        => 'TRASLADADO',
+            'aplazado'          => 'APLAZADO',
+            'induccion'         => 'INDUCCIÓN',
+            'inducción'         => 'INDUCCIÓN',
+            'condicionado'      => 'CONDICIONADO',
+            'no registra'       => 'NO REGISTRA',
+        ];
+
+        $candidate = $map[$norm] ?? null;
+
+        if ($candidate && in_array($candidate, $allowedEnum, true)) {
+            return $candidate;
+        }
+
+        // Si el Excel ya trae algo igual al ENUM (ej: EN FORMACIÓN) respétalo
+        $upper = mb_strtoupper($raw);
+        if (in_array($upper, $allowedEnum, true)) {
+            return $upper;
+        }
+
+        // fallback seguro
+        return 'EN FORMACIÓN';
+    }
+
 
 
     private function budgetItemsForInstructorArea(int $personId, int $areaId)
@@ -2714,22 +2561,37 @@ class ProgrammeController extends Controller
         if (!$user || !$user->person) abort(403);
         $personId = (int) $user->person->id;
 
-        // 0) Guardas fuertes: vigencia + áreas
-        $canCreate = true;
+        // 0) Guardas fuertes
+        $canCreate   = true;
         $blockReason = null;
 
         if (!$this->isInstructorVigente($personId)) {
-            $canCreate = false;
+            $canCreate   = false;
             $blockReason = 'Tu usuario no tiene contrato vigente. No puedes realizar solicitudes.';
         }
 
-        $areaOptions = $this->availableAreasForInstructor($personId);
+        // 1) Áreas disponibles (NORMALIZA)
+        $areaOptionsRaw = $this->availableAreasForInstructor($personId);
+
+        // Normaliza opciones a keys en minúscula y sin espacios
+        $areaOptions = array_values(array_filter(array_map(function ($opt) {
+            // soporta opt como array o como objeto
+            $key = null;
+            if (is_array($opt) && isset($opt['key'])) $key = $opt['key'];
+            if (is_object($opt) && isset($opt->key)) $key = $opt->key;
+
+            $key = $key !== null ? trim(mb_strtolower((string)$key)) : null;
+            if (!$key) return null;
+
+            return ['key' => $key];
+        }, $areaOptionsRaw)));
+
         if ($canCreate && empty($areaOptions)) {
-            $canCreate = false;
+            $canCreate   = false;
             $blockReason = 'No tienes un área asignada. Solicita a Coordinación/Apoyo que te asocien a un área y rubro.';
         }
 
-        // Si está bloqueado, retornamos vista con colecciones vacías (no revienta) y botón deshabilitado
+        // Si está bloqueado, no revienta la vista
         if (!$canCreate) {
             $titlePage = 'Solicitud de programas';
             $titleView = 'Solicitud de programas';
@@ -2752,24 +2614,31 @@ class ProgrammeController extends Controller
             ]);
         }
 
-        // 1) Resolver área: NUNCA inventar "academic" si el instructor no la tiene
+        // 2) Resolver área permitida (prioridad: query > ruta > fallback)
         $allowedKeys = array_values(array_unique(array_column($areaOptions, 'key')));
 
-        $areaKey = $this->resolveAreaKeyFromRoute();
-        if (!in_array($areaKey, $allowedKeys, true)) {
-            $areaKey = $allowedKeys[0];
-        }
+        $areaKey = null;
 
-        if ($request->filled('area')) {
-            $candidate = (string) $request->get('area');
-            if (in_array($candidate, $allowedKeys, true)) {
-                $areaKey = $candidate;
+        $candidate = $request->filled('area')
+            ? trim(mb_strtolower((string)$request->get('area')))
+            : null;
+
+        if ($candidate && in_array($candidate, $allowedKeys, true)) {
+            $areaKey = $candidate;
+        } else {
+            $fromRoute = $this->resolveAreaKeyFromRoute(); // academic|campesena|null
+            $fromRoute = $fromRoute ? trim(mb_strtolower((string)$fromRoute)) : null;
+
+            if ($fromRoute && in_array($fromRoute, $allowedKeys, true)) {
+                $areaKey = $fromRoute;
+            } else {
+                $areaKey = $allowedKeys[0] ?? null; // fallback real
             }
         }
 
-        $areaId = $this->resolveAreaIdOrFail($areaKey);
+        $areaId = $areaKey ? $this->resolveAreaIdOrFail($areaKey) : null; // 1 campesena / 2 academic
 
-        // 2) Datos para la vista (solo si puede crear)
+        // 3) Data vista
         $programs = DB::table('programs')
             ->select('id', 'name')
             ->orderBy('name')
@@ -2780,36 +2649,39 @@ class ProgrammeController extends Controller
             ->orderBy('name')
             ->get();
 
-        // Municipios del depto 421
-        $DEPT_ID = 421;
+        $DEPT_ID = 421; // Huila (ajusta si aplica)
         $municipalities = DB::table('municipalities')
             ->select('id', 'name')
             ->where('department_id', $DEPT_ID)
             ->orderBy('name')
             ->get();
 
-        // (Opcional) precarga (si quieres mantener tu debug)
         $villageIds = DB::table('villages')
             ->select('id', 'name', 'municipality_id')
             ->whereIn('municipality_id', $municipalities->pluck('id'))
             ->orderBy('name')
             ->get();
 
-        // Rubros permitidos para el instructor en esa área
+        $today = now()->toDateString();
+
         $rubros = DB::table('person_area_budget_assignments as paba')
-            ->join('area_budget_items as abi', function ($j) {
-                $j->on('abi.area_id', '=', 'paba.area_id')
-                    ->on('abi.budget_item_id', '=', 'paba.budget_item_id');
-            })
             ->join('budget_items as bi', 'bi.id', '=', 'paba.budget_item_id')
             ->where('paba.person_id', $personId)
+            ->where('paba.area_id', (int)$areaId)   
             ->where('paba.is_active', 1)
-            ->where('paba.area_id', $areaId)
-            ->where('abi.active', 1)
+            ->where(function ($q) use ($today) {
+                $q->whereNull('paba.start_date')
+                    ->orWhereDate('paba.start_date', '<=', $today);
+            })
+            ->where(function ($q) use ($today) {
+                $q->whereNull('paba.end_date')
+                    ->orWhereDate('paba.end_date', '>=', $today);
+            })
             ->select('bi.id', DB::raw("COALESCE(bi.code,'') as code"), 'bi.name')
-            ->orderBy('bi.name')
             ->distinct()
+            ->orderBy('bi.name')
             ->get();
+
 
         $companySuggestions = DB::table('companies')
             ->select('id', 'name', 'nit')
@@ -2846,9 +2718,7 @@ class ProgrammeController extends Controller
         ));
     }
 
-    /* ============================================================
-     | STORE (guardar) - guardas obligatorias
-     * ============================================================ */
+
     public function program_request_store(Request $request)
     {
         $user = Auth::user();
@@ -2882,7 +2752,7 @@ class ProgrammeController extends Controller
 
         $areaId = $this->resolveAreaIdOrFail($areaKey);
 
-        // Validación
+        // ✅ VALIDACIÓN MEJORADA
         $validated = $request->validate([
             'program_id'          => 'required|integer|exists:programs,id',
             'special_program_id'  => 'required|integer|exists:special_programs,id',
@@ -2908,9 +2778,11 @@ class ProgrammeController extends Controller
             'email'               => 'nullable|email|max:255',
             'telephone'           => 'nullable|string|max:50',
 
-            'cedula_pdf'          => 'nullable|file|mimes:pdf|max:10240',
-            'carta_pdf'           => 'nullable|file|mimes:pdf|max:10240',
-            'bulk_excel'          => 'nullable|file|mimes:xls,xlsx|max:10240',
+            // ✅ VALIDACIÓN CORRECTA para documents[]
+            'documents'           => 'nullable|array',
+            'documents.*'         => 'nullable|file|mimes:pdf,xlsx,xls,jpg,jpeg,png|max:10240',
+            'document_types'      => 'nullable|array',
+            'document_types.*'    => 'nullable|string|in:cedula,cargue_masivo,carta',
 
             'dates'               => 'required|array|min:1',
             'dates.*'             => 'required|date',
@@ -3001,6 +2873,7 @@ class ProgrammeController extends Controller
 
         DB::beginTransaction();
         try {
+            // Crear solicitud
             $prId = DB::table('program_requests')->insertGetId([
                 'person_id'          => $personId,
                 'area_id'            => $areaId,
@@ -3011,6 +2884,7 @@ class ProgrammeController extends Controller
 
                 'municipality_id'    => (int) $validated['municipality_id'],
                 'village_id'         => $villageId,
+                'place_type'         => $validated['place_type'],
 
                 'hours'              => (int) $validated['hours'],
                 'start_date'         => $validated['start_date'],
@@ -3029,6 +2903,7 @@ class ProgrammeController extends Controller
                 'updated_at'         => now(),
             ]);
 
+            // Guardar fechas
             foreach ($validated['dates'] as $i => $date) {
                 DB::table('program_request_dates')->insert([
                     'program_request_id' => $prId,
@@ -3040,6 +2915,65 @@ class ProgrammeController extends Controller
                 ]);
             }
 
+            // ✅ GUARDAR DOCUMENTOS CORRECTAMENTE
+            if ($request->hasFile('documents')) {
+                $baseDir = "sigac/program_requests/{$prId}/documents";
+                $files = $request->file('documents');
+                $types = $request->input('document_types', []);
+
+                foreach ($files as $index => $file) {
+                    if (!$file || !$file->isValid()) {
+                        Log::warning('SIGAC: archivo inválido en índice ' . $index, [
+                            'program_request_id' => $prId,
+                            'error' => $file?->getError(),
+                        ]);
+                        continue;
+                    }
+
+                    $original = $file->getClientOriginalName();
+                    $safeBase = Str::slug(pathinfo($original, PATHINFO_FILENAME));
+                    $ext = strtolower($file->getClientOriginalExtension());
+                    $filename = $safeBase . '-' . now()->format('Ymd_His') . '-' . Str::random(6) . '.' . $ext;
+
+                    $path = $file->storeAs($baseDir, $filename, 'public');
+
+                    if (!$path) {
+                        Log::error('SIGAC: no se pudo guardar archivo', [
+                            'program_request_id' => $prId,
+                            'original' => $original,
+                            'disk' => 'public',
+                            'baseDir' => $baseDir
+                        ]);
+                        continue;
+                    }
+
+                    // Determinar el tipo de documento
+                    $docType = $types[$index] ?? 'documento';
+                    $displayName = match ($docType) {
+                        'cedula' => 'Cédula',
+                        'cargue_masivo' => 'Cargue Masivo',
+                        'carta' => 'Carta',
+                        default => 'Documento'
+                    };
+
+                    // Guardar en BD
+                    DB::table('program_request_documents')->insert([
+                        'program_request_id' => $prId,
+                        'name' => $displayName . ' - ' . $original,
+                        'path' => $path,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+
+                    Log::info('SIGAC: documento guardado', [
+                        'program_request_id' => $prId,
+                        'file' => $filename,
+                        'type' => $displayName,
+                        'path' => $path
+                    ]);
+                }
+            }
+
             DB::commit();
 
             $routeRole = getRoleRouteName(Route::currentRouteName());
@@ -3049,40 +2983,50 @@ class ProgrammeController extends Controller
                 ->with('success', 'Solicitud creada correctamente.');
         } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('SIGAC: error guardando solicitud', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
             return back()->withInput()->with('error', 'Error guardando la solicitud: ' . $e->getMessage());
         }
     }
 
-    /* ============================================================
-     | PRIVADOS (corregidos)
-     * ============================================================ */
+
 
     private function availableAreasForInstructor(int $personId): array
     {
-        // Toma áreas por asignación activa y además filtra por rango de fechas (vigencia de la asignación)
-        $areaIds = DB::table('person_area_budget_assignments')
-            ->where('person_id', $personId)
-            ->where('is_active', 1)
+        $today = Carbon::today()->toDateString();
+
+        $areaIds = DB::table('person_area_budget_assignments as pa')
+            ->where('pa.person_id', $personId)
+            ->where('pa.is_active', 1)
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.start_date')->orWhereDate('pa.start_date', '<=', $today);
+            })
+            ->where(function ($q) use ($today) {
+                $q->whereNull('pa.end_date')->orWhereDate('pa.end_date', '>=', $today);
+            })
             ->distinct()
-            ->pluck('area_id')
-            ->map(fn($id) => (int) $id)
+            ->pluck('pa.area_id')
+            ->map(fn($id) => (int)$id)
             ->values()
             ->all();
 
         $opts = [];
         foreach ($areaIds as $id) {
-            if (!$this->instructorHasActiveAreaAssignment($personId, $id)) continue;
-
-            $name = (string) DB::table('areas')->where('id', $id)->value('name');
-            $key  = (stripos($name, 'CAMPESENA') !== false) ? 'campesena' : 'academic';
-
-            $opts[] = ['id' => $id, 'key' => $key];
+            // Key estable por ID (no por name)
+            $opts[] = [
+                'id'  => $id,
+                'key' => ($id === 1) ? 'campesena' : 'academic', // ajusta si cambian IDs
+            ];
         }
 
-        // quitar duplicados por key (por si hay múltiples áreas que terminan en academic)
-        $byKey = [];
-        foreach ($opts as $o) $byKey[$o['key']] = $o;
-        return array_values($byKey);
+        // únicos por key
+        $unique = [];
+        foreach ($opts as $o) $unique[$o['key']] = $o;
+
+        return array_values($unique);
     }
 
     private function resolveAreaKeyFromRoute(): string
@@ -3092,11 +3036,17 @@ class ProgrammeController extends Controller
 
     private function resolveAreaIdOrFail(string $areaKey): int
     {
-        $areaName = $areaKey === 'campesena' ? 'CAMPESENA' : 'COORDINACIÓN ACADÉMICA';
-        $areaId = DB::table('areas')->where('name', $areaName)->value('id');
-        if (!$areaId) abort(403, "No existe el área parametrizada: {$areaName} (tabla areas).");
-        return (int) $areaId;
+        $map = [
+            'campesena' => 1,
+            'academic'  => 2,
+        ];
+
+        if (!isset($map[$areaKey])) {
+            abort(403, "Área inválida: {$areaKey}");
+        }
+        return (int) $map[$areaKey];
     }
+
 
     private function isInstructorVigente(int $personId): bool
     {
@@ -3202,74 +3152,7 @@ class ProgrammeController extends Controller
             abort(403);
         }
     }
-    private function getInstructorAreaOptions(int $personId): array
-    {
-        $areaIds = \DB::table('person_area_budget_assignments')
-            ->where('person_id', $personId)
-            ->where('is_active', 1)
-            ->distinct()
-            ->pluck('area_id')
-            ->map(fn($id) => (int)$id)
-            ->values()
-            ->all();
 
-        $opts = [];
-        foreach ($areaIds as $id) {
-            $opts[] = [
-                'id'  => $id,
-                'key' => ($id === 1) ? 'campesena' : 'academic',
-            ];
-        }
-        return $opts;
-    }
-    private function notifyProgramRequest(ProgramRequest $pr, string $type, ?string $note = null, array $extra = []): void
-    {
-        // Instructor
-        $instructorEmail =
-            $pr->person?->misena_email
-            ?? $pr->person?->sena_email
-            ?? $pr->person?->personal_email;
-
-        // Solicitante (del formulario)
-        $applicantEmail = $pr->email ? strtolower(trim($pr->email)) : null;
-
-        // Login link (ajústalo si tienes ruta específica)
-        $loginUrl = url('/login');
-
-        // Fechas para incluir en correo (si existen)
-        $dates = [];
-        if (method_exists($pr, 'dates') && $pr->relationLoaded('dates')) {
-            $dates = $pr->dates->map(fn($d) => [
-                'date' => (string)$d->date,
-                'start_time' => (string)$d->start_time,
-                'end_time' => (string)$d->end_time,
-            ])->values()->all();
-        }
-
-        $payload = array_merge([
-            'note' => $note,
-            'login_url' => $loginUrl,
-            'dates' => $dates,
-        ], $extra);
-
-        // CC/BCC a correos de aprendices (opcional)
-        // Recomendación: BCC si son muchos.
-        $bcc = $extra['bcc'] ?? [];
-
-        // Enviar al instructor
-        if ($instructorEmail && filter_var($instructorEmail, FILTER_VALIDATE_EMAIL)) {
-            Mail::to($instructorEmail)
-                ->bcc($bcc)
-                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
-        }
-
-        // Enviar al solicitante
-        if ($applicantEmail && filter_var($applicantEmail, FILTER_VALIDATE_EMAIL)) {
-            Mail::to($applicantEmail)
-                ->bcc($bcc)
-                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
-        }
-    }
     public function course_apprentices_count(Request $request)
     {
         $code = trim((string) $request->get('code_course', ''));
@@ -3295,6 +3178,297 @@ class ProgrammeController extends Controller
             'course_id' => $course->id,
             'count' => $count,
             'message' => $count > 0 ? "Tiene {$count} aprendices registrados." : "No tiene aprendices registrados.",
+        ]);
+    }
+    public function program_request_document_view(Request $request, $prId, $documentId)
+    {
+        if (!function_exists('checkRol') || !(
+            checkRol('sigac.instructor') ||
+            checkRol('sigac.academic_coordinator') ||
+            checkRol('sigac.campesena') ||
+            checkRol('gdf.academic_support') ||
+            checkRol('gdf.campesena_support') ||
+            checkRol('superadmin')
+        )) abort(403);
+
+        $pr  = ProgramRequest::findOrFail($prId);
+
+        $doc = ProgramRequestDocument::where('id', $documentId)
+            ->where('program_request_id', $pr->id)
+            ->firstOrFail();
+
+        if (function_exists('checkRol') && checkRol('sigac.instructor')) {
+            $personId = (int) optional(auth()->user()->person)->id;
+            if (!$personId || (int)$pr->person_id !== $personId) abort(403);
+        }
+
+        $disk = Storage::disk('public');
+
+        if (!$doc->path || !$disk->exists($doc->path)) {
+            return back()->with('error', 'El archivo no existe o fue movido.');
+        }
+
+        $absPath = $disk->path($doc->path);
+
+        $filename = $doc->name ?: basename($doc->path);
+        $filename = (string) Str::of($filename)->replace(['"', "\n", "\r"], '');
+
+        $mime = function_exists('mime_content_type') ? @mime_content_type($absPath) : null;
+        if (!$mime) $mime = $disk->mimeType($doc->path) ?: 'application/octet-stream';
+
+        return response()->file($absPath, [
+            'Content-Type' => $mime,
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+
+    public function program_request_document_download(Request $request, $prId, $documentId)
+    {
+        if (!function_exists('checkRol') || !(
+            checkRol('sigac.instructor') ||
+            checkRol('sigac.academic_coordinator') ||
+            checkRol('sigac.campesena') ||
+            checkRol('gdf.academic_support') ||
+            checkRol('gdf.campesena_support') ||
+            checkRol('superadmin')
+        )) abort(403);
+
+        $pr  = ProgramRequest::findOrFail($prId);
+
+        $doc = ProgramRequestDocument::where('id', $documentId)
+            ->where('program_request_id', $pr->id)
+            ->firstOrFail();
+
+        if (function_exists('checkRol') && checkRol('sigac.instructor')) {
+            $personId = (int) optional(auth()->user()->person)->id;
+            if (!$personId || (int)$pr->person_id !== $personId) abort(403);
+        }
+
+        $disk = Storage::disk('public');
+
+        if (!$doc->path || !$disk->exists($doc->path)) {
+            return back()->with('error', 'El archivo no existe o fue movido.');
+        }
+
+        $absPath = $disk->path($doc->path);
+
+        $filename = $doc->name ?: basename($doc->path);
+        $filename = (string) Str::of($filename)->replace(['"', "\n", "\r"], '');
+
+        return response()->download($absPath, $filename);
+    }
+
+
+
+    public function uploadDocuments(Request $request, $programRequestId)
+    {
+        return $this->program_request_document_store($request, $programRequestId);
+    }
+    public function program_request_download($id)
+    {
+        try {
+            if (!function_exists('checkRol') || !(
+                checkRol('gdf.academic_support') ||
+                checkRol('gdf.campesena_support') ||
+                checkRol('sigac.academic_coordinator') ||
+                checkRol('sigac.campesena') ||
+                checkRol('superadmin')
+            )) {
+                abort(403);
+            }
+
+            $pr = ProgramRequest::with('documents')->findOrFail($id);
+            $docs = $pr->documents ?? collect();
+
+            if ($docs->isEmpty()) {
+                return back()->with('error', 'Esta solicitud no tiene documentos cargados.');
+            }
+
+            Storage::makeDirectory('tmp');
+            $zipName = 'program_request_' . $pr->id . '_' . Str::random(8) . '.zip';
+            $zipRelPath = 'tmp/' . $zipName;
+            $zipAbsPath = storage_path('app/' . $zipRelPath);
+
+            $zip = new \ZipArchive();
+            if ($zip->open($zipAbsPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+                return back()->with('error', 'No se pudo crear el ZIP.');
+            }
+
+            $added = 0;
+
+            foreach ($docs as $doc) {
+                $relPath = $doc->path; // relativo a disk public
+                if (!$relPath || !Storage::disk('public')->exists($relPath)) continue;
+
+                $absPath = Storage::disk('public')->path($relPath);
+                if (!is_file($absPath)) continue;
+
+                $nameInZip = $doc->name ?: basename($relPath);
+
+                // Evitar duplicados en ZIP
+                if ($zip->locateName($nameInZip) !== false) {
+                    $nameInZip = pathinfo($nameInZip, PATHINFO_FILENAME)
+                        . '_' . Str::random(4)
+                        . '.' . pathinfo($nameInZip, PATHINFO_EXTENSION);
+                }
+
+                $zip->addFile($absPath, $nameInZip);
+                $added++;
+            }
+
+            $zip->close();
+
+            if ($added === 0 || !file_exists($zipAbsPath)) {
+                @unlink($zipAbsPath);
+                return back()->with('error', 'No se generó el ZIP (no hay archivos válidos para empaquetar).');
+            }
+
+            return response()->download($zipAbsPath)->deleteFileAfterSend(true);
+        } catch (\Throwable $e) {
+            Log::error('program_request_download zip error', [
+                'program_request_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+            return back()->with('error', 'No fue posible generar el ZIP: ' . $e->getMessage());
+        }
+    }
+    private function notifyProgramRequest(ProgramRequest $pr, string $type, ?string $note = null, array $extra = []): void
+    {
+        // Asegurar relaciones
+        if (! $pr->relationLoaded('dates')) {
+            $pr->load('dates', 'person', 'program');
+        }
+
+        // Instructor email
+        $instructorEmail =
+            $pr->person?->misena_email
+            ?? $pr->person?->sena_email
+            ?? $pr->person?->personal_email;
+
+        // Solicitante (del formulario)
+        $applicantEmail = $pr->email ? strtolower(trim($pr->email)) : null;
+
+        // Link login
+        $loginUrl = url('/login');
+
+        // Link público (lista de inscritos)
+        $publicUrl = null;
+        if (!empty($pr->code_course)) {
+            try {
+                $publicUrl = route('sigac.public.course.apprentices', ['code' => $pr->code_course]);
+            } catch (\Throwable $e) {
+                // Si la ruta no existe aún, no rompemos el envío
+                $publicUrl = null;
+            }
+        }
+
+        // Fechas + horas
+        $dates = $pr->dates
+            ? $pr->dates->map(fn($d) => [
+                'date'       => (string) $d->date,
+                'start_time' => (string) $d->start_time,
+                'end_time'   => (string) $d->end_time,
+            ])->values()->all()
+            : [];
+
+        $payload = array_merge([
+            'note'       => $note,
+            'login_url'  => $loginUrl,
+            'public_url' => $publicUrl,
+            'dates'      => $dates,
+            'type'       => $type,
+        ], $extra);
+
+        $bcc = $extra['bcc'] ?? [];
+
+        // Enviar al instructor
+        if ($instructorEmail && filter_var($instructorEmail, FILTER_VALIDATE_EMAIL)) {
+            Mail::to($instructorEmail)
+                ->bcc($bcc)
+                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
+        }
+
+        // Enviar al solicitante
+        if ($applicantEmail && filter_var($applicantEmail, FILTER_VALIDATE_EMAIL)) {
+            Mail::to($applicantEmail)
+                ->bcc($bcc)
+                ->send(new ProgramRequestStatusMail($pr, $type, $payload));
+        }
+    }
+
+    public function publicCourseApprentices($code)
+    {
+        $course = Course::where('code', $code)->firstOrFail();
+
+        $apprentices = Apprentice::with('person')
+            ->where('course_id', $course->id)
+            ->orderBy('id')
+            ->get();
+
+        return view('sigac::programming.program_request.course_apprentices', compact('course', 'apprentices'));
+    }
+
+
+    public function program_request_excel_template()
+    {
+        // Roles permitidos (ajusta si quieres)
+        if (!function_exists('checkRol') || !(
+            checkRol('sigac.instructor') ||
+            checkRol('sigac.academic_coordinator') ||
+            checkRol('sigac.campesena') ||
+            checkRol('sigac.wellness') ||
+            checkRol('sigac.apprentice') ||
+            checkRol('gdf.academic_support') ||
+            checkRol('gdf.campesena_support') ||
+            checkRol('superadmin')
+        )) {
+            abort(403);
+        }
+
+        // En storage/app/templates/...
+        $disk = 'local';
+        $path = 'templates/program_request_template.xlsx';
+
+        if (!Storage::disk($disk)->exists($path)) {
+            return back()->with('error', 'La plantilla Excel no existe en storage/app/templates (templates/program_request_template.xlsx).');
+        }
+
+        $filename = 'plantilla_solicitud_programacion.xlsx';
+
+        // ✅ Más robusto que response()->download(path...)
+        return Storage::disk($disk)->download($path, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
+    public function downloadApprenticesTemplate()
+    {
+        // Roles permitidos (ajusta)
+        if (!function_exists('checkRol') || !(
+            checkRol('sigac.instructor') ||
+            checkRol('sigac.academic_coordinator') ||
+            checkRol('sigac.campesena') ||
+            checkRol('gdf.academic_support') ||
+            checkRol('gdf.campesena_support') ||
+            checkRol('superadmin')
+        )) {
+            abort(403);
+        }
+
+        // En storage/app/templates/...
+        $disk = 'local';
+        $path = 'templates/apprentices_template.xlsx';
+
+        if (!Storage::disk($disk)->exists($path)) {
+            return back()->with('error', 'La plantilla de aprendices no existe en storage/app/templates (templates/apprentices_template.xlsx).');
+        }
+
+        $filename = 'plantilla_cargue_masivo_aprendices.xlsx';
+
+        return Storage::disk($disk)->download($path, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 }

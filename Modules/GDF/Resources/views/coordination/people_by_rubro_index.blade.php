@@ -6,11 +6,11 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
       <h4 class="mb-0">{{ $title }} - Personas por rubro</h4>
-      <small class="text-muted">Agrupado por rubro (asignaciones).</small>
+      <small class="text-muted">Agrupado por rubro.</small>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-outline-primary" href="{{ route($routePrefix.'.people.create') }}">+ Registrar persona</a>
-      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.review') }}">Volver</a>
+      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.dashboard') }}">Volver</a>
     </div>
   </div>
 
@@ -22,7 +22,7 @@
             <label class="form-label">Área</label>
             <select name="area_id" class="form-select">
               @foreach($areas as $a)
-                <option value="{{ $a->id }}" @selected((int)$areaId===(int)$a->id)>{{ $a->name }}</option>
+                <option value="{{ $a->id }}">{{ $a->name }}</option>
               @endforeach
             </select>
           </div>
@@ -54,7 +54,7 @@
         <thead>
           <tr>
             <th>Rubro</th>
-            <th class="text-end">Personas (distinct)</th>
+            <th class="text-end">Personas</th>
             <th class="text-end">Asignaciones activas</th>
             <th style="width:160px">Acción</th>
           </tr>

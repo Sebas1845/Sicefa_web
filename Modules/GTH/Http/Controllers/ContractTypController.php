@@ -8,12 +8,17 @@ use Modules\SICA\Entities\ContractorType;
 
 class ContractTypController extends Controller
 {
+
+    
     //Funcion mostrar vista tipo de empleado
     public function viewcontractortypes()
     {
         $contractortype = ContractorType::get();
         return view('gth::types_contractor.contractortype',['contractortype'=> $contractortype]);
     }
+
+
+
 
 
     public function postcreatecontractortypes(Request $request)
@@ -63,5 +68,4 @@ class ContractTypController extends Controller
             return redirect()->route('gth.admin.contractortypes.index')->with('error', trans('gth::menu.The contractor type could not be deleted.'));
         }
     }
-
 }

@@ -1,3 +1,4 @@
+{{-- Modules/GDF/Resources/views/admin/dashboard.blade.php --}}
 @extends('gdf::layouts.masteruser')
 
 @section('title','GDF | Admin')
@@ -26,6 +27,10 @@
     $recentLogs     = $recentLogs ?? collect();
 
     $roleName = $isSuperAdmin ? 'Super Admin' : ($isSubdirection ? 'Subdirección' : 'Tesorería');
+
+    // ✅ Ruta del módulo de Storage Admin (ajústala si tu nombre de ruta cambia)
+    // Sugeridas: admin.storage.index o gdf.admin.storage.index
+    $storageRouteName = $storageRouteName ?? 'gdf.admin.storage.index';
 @endphp
 
 <div class="row g-4">
@@ -65,11 +70,18 @@
                         <i class="bi bi-people"></i> Usuarios y roles
                     </a>
 
+                    {{-- ✅ NUEVO: Liberar espacio (solo SuperAdmin) --}}
+                    @if($isSuperAdmin)
+                        <a href="{{ route($storageRouteName) }}" class="btn btn-warning btn-sm">
+                            <i class="bi bi-trash3"></i> Liberar espacio
+                        </a>
+                    @endif
+
                     <a href="#" class="btn btn-gdf-ghost btn-sm">
                         <i class="bi bi-clipboard-data"></i> Auditoría
                     </a>
 
-                    <a href="# " class="btn btn-outline-light btn-sm">
+                    <a href="{{ route('gdf.gateway') }}" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-house"></i> Volver al inicio
                     </a>
                 </div>
@@ -81,12 +93,12 @@
             <div class="row g-3">
                 @php
                     $kpiCards = [
-                        ['key'=>'total',     'title'=>'Solicitudes',        'icon'=>'bi-inboxes',        'hint'=>'Total registradas'],
-                        ['key'=>'submitted', 'title'=>'En trámite',         'icon'=>'bi-hourglass-split','hint'=>'Pendientes por revisar'],
-                        ['key'=>'approved',  'title'=>'Aprobadas',          'icon'=>'bi-check2-circle',  'hint'=>'Listas / aprobadas'],
-                        ['key'=>'returned',  'title'=>'Devueltas',          'icon'=>'bi-arrow-return-left','hint'=>'Requieren ajuste'],
-                        ['key'=>'rejected',  'title'=>'Rechazadas',         'icon'=>'bi-x-circle',       'hint'=>'No aprobadas'],
-                        ['key'=>'draft',     'title'=>'Borradores',         'icon'=>'bi-pencil-square',  'hint'=>'Sin enviar'],
+                        ['key'=>'total',     'title'=>'Solicitudes',        'icon'=>'bi-inboxes',           'hint'=>'Total registradas'],
+                        ['key'=>'submitted', 'title'=>'En trámite',         'icon'=>'bi-hourglass-split',   'hint'=>'Pendientes por revisar'],
+                        ['key'=>'approved',  'title'=>'Aprobadas',          'icon'=>'bi-check2-circle',     'hint'=>'Listas / aprobadas'],
+                        ['key'=>'returned',  'title'=>'Devueltas',          'icon'=>'bi-arrow-return-left', 'hint'=>'Requieren ajuste'],
+                        ['key'=>'rejected',  'title'=>'Rechazadas',         'icon'=>'bi-x-circle',          'hint'=>'No aprobadas'],
+                        ['key'=>'draft',     'title'=>'Borradores',         'icon'=>'bi-pencil-square',     'hint'=>'Sin enviar'],
                     ];
                 @endphp
 
@@ -128,9 +140,18 @@
                             <a href="{{ route('gdf.admin.users.index') }}" class="btn btn-success btn-sm">
                                 <i class="bi bi-person-plus"></i> Asignar roles
                             </a>
+
                             <a href="{{ route('gdf.gateway') }}" class="btn btn-outline-light btn-sm">
                                 <i class="bi bi-arrow-repeat"></i> Cambiar contexto (op.)
                             </a>
+
+                            {{-- ✅ NUEVO: Storage Admin --}}
+                            @if($isSuperAdmin)
+                                <a href="{{ route($storageRouteName) }}" class="btn btn-warning btn-sm">
+                                    <i class="bi bi-hdd-stack"></i> Storage / Liberar espacio
+                                </a>
+                            @endif
+
                             <a href="#" class="btn btn-outline-light btn-sm">
                                 <i class="bi bi-download"></i> Exportar reporte
                             </a>
@@ -139,6 +160,13 @@
                         <div class="text-white-50 small mt-3">
                             Nota: la opción de “cambiar contexto” es útil solo si estás probando flujos operativos.
                         </div>
+
+                        @if($isSuperAdmin)
+                            <div class="text-white-50 small mt-2">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                Storage Admin elimina archivos físicos en <code class="text-white-50">storage/app/public</code>. Úsalo con cuidado.
+                            </div>
+                        @endif
                     </div>
                 </div>
 
@@ -163,6 +191,26 @@
                                 <span>Gestión de usuarios usa roles del módulo <code class="text-white-50">gdf.*</code>.</span>
                             </li>
                         </ul>
+
+                        {{-- ✅ MINI-CARD opcional: Acceso directo a Storage --}}
+                        @if($isSuperAdmin)
+                            <hr class="border-white border-opacity-10 my-3">
+                            <div class="gdf-card p-3" style="background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.18);">
+                                <div class="d-flex align-items-center justify-content-between gap-2">
+                                    <div>
+                                        <div class="fw-semibold">
+                                            <i class="bi bi-trash3"></i> Liberar espacio (Storage)
+                                        </div>
+                                        <div class="text-white-50 small">
+                                            Revisa carpetas y elimina archivos para liberar almacenamiento.
+                                        </div>
+                                    </div>
+                                    <a href="{{ route($storageRouteName) }}" class="btn btn-warning btn-sm">
+                                        Ir
+                                    </a>
+                                </div>
+                            </div>
+                        @endif
                     </div>
                 </div>
             </div>

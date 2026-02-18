@@ -33,7 +33,7 @@ return [
 	'Status' => 'Estado',
 	'Save' => 'Guardar',
 	'Confirm Deletion' => 'Confirmar Eliminación',
-	'¿Are you sure you want to delete this attendance?'=> '¿Estás seguro de que deseas eliminar esta asistencia?',
+	'¿Are you sure you want to delete this attendance?' => '¿Estás seguro de que deseas eliminar esta asistencia?',
 	'Cancel' => 'Cancelar',
 	'Delete' => 'Eliminar',
 	'Edit Attendance' => 'Editar Asistencia',
@@ -42,12 +42,27 @@ return [
 	'Status' => 'Estado',
 	'Save Changes' => 'Guarda Cambios',
 
-    //sidebar
+	//sidebar
 	'GTH' => 'GTH',
 	'Contracts' => 'Contratos',
 	'Employment Contract' => 'Contratista',
 	'Contract Report' => 'Reporte Contrato',
 	'Contract Certificate' => 'Certificado Contractual',
+
+
+
+
+
+
+	//pasantes
+	'Interns' => 'Pasantes',
+	'Create Intern' => 'Crear Pasante',
+	
+
+	//crear sertificados
+	'title' => 'Certificación Contractual',
+
+
 	'Configuration' => 'Configuración',
 	'Type of Contract' => 'Tipo de Contrato',
 	'Type of Employee' => 'Tipo de Empleado',
@@ -55,10 +70,64 @@ return [
 	'Pension' => 'Pensión',
 	'Grades' => 'Grados',
 	'Officials' => 'Funcionarios',
+
+	'' => '',
+	'' => '',
+	'' => '',
+
+	//certificate 
+	'Contractor Name' => 'Nombre del Contratista',
+	'Start Date' => 'Fecha de Inicio',
+	'End Date' => 'Fecha de Finalización',
+	'Total Value' => 'Valor Total',
+	'Generate Certificate' => 'Generar Certificado',
+	'Search Results' => 'Resultados de Búsqueda',
+	'Document Number' => 'Número de Documento',
+	'Actions' => 'Acciones',
+	'Enter Document Number' => 'Ingrese Número de Documento',
+	'Contractual Certificate' => 'Certificado Contractual',
+	'Search Contractual Certificate' => 'Buscar Certificado Contractual',
+	'Enter the ID number' => 'Ingrese el número de identificación',
+	'Search' => 'Buscar',
 	
-	'' => '',
-	'' => '',
-	'' => '',
+	'Payment Method' => 'Forma de Pago',
+    'Payment Type' => 'Tipo de Pago',
+    'Select' => '-- Seleccione --',
+    'Monthly' => 'Mensual',
+    'By Hours' => 'Por Horas',
+    'Monthly Payment Value' => 'Valor de Pago Mensual',
+    'Hourly Value' => 'Valor por Hora',
+    'Total Value' => 'Valor Total',
+    'End Date' => 'Fecha de Fin',
+    'Start Date' => 'Fecha de Inicio',
+    'Actions' => 'Acciones',
+    'Enter the ID number' => 'Ingrese el número de documento',
+    'Search Contractual Certificate' => 'Buscar Certificado Contractual',
+
+
+	 // Títulos
+    'title' => 'Certificación Contractual',
+    'search_title' => 'Buscar Certificación Contractual',
+    'results_title' => 'Resultados de Búsqueda',
+    
+    // Formulario
+    'document_number' => 'Número de Documento',
+    'enter_document_placeholder' => 'Ingrese el número de identificación',
+    'search_button' => 'Buscar',
+    
+    // Tabla
+    'contract_number' => 'N° Contrato',
+    'contractor_name' => 'Nombre',
+	'contract_date' => 'Fecha Contrato',
+    'start_date' => 'Fecha Inicio',
+    'end_date' => 'Fecha Fin',
+    'total_value' => 'Valor Total',
+    'actions' => 'Acciones',
+    'generate_certificate' => 'Generar Certificado',
+    
+    // Mensajes
+    'no_person_found' => 'No se encontró ninguna persona con ese número de documento.',
+    'no_contracts_found' => 'No se encontraron contratos para esta persona.',
 
 
 	//contractors
@@ -70,10 +139,10 @@ return [
 	'actions' => 'Acciones',
 	'Edit' => 'Editar',
 	'Delete' => 'Eliminar',
-	
+
 	'Edit Contract' => 'Editar Contrato:',
 	'Contract Number' => 'Número de Contrato',
-	'Contract Year:' => 'Año de Contrato:',
+	'Contract Date:' => 'Fecha de Contrato:',
 	'Contract Start Date:' => 'Fecha de Inicio de Contrato:',
 	'Contract End Date:' => 'Fecha de Fin de Contrato:',
 	'Type of Contract:' => 'Tipo de Contrato:',
@@ -129,7 +198,7 @@ return [
 	'Enter the supervisor ID' => 'Digite el id del supervisor',
 	'Contract Number:' => 'Número de Contrato:',
 	'Enter the contract number' => 'Digite el número de contrato',
-	'Contract Year:' => 'Año de Contrato:',
+	'Contract Date:' => 'Fecha de Contrato:',
 	'Contract Start Date:' => 'Fecha Inicio Contrato:',
 	'Contract End Date:' => 'Fecha Fin Contrato:',
 	'Type of Contract:' => 'Tipo de Contrato:',
@@ -207,7 +276,7 @@ return [
 	'Error' => 'Error',
 	'Contract Type updated successfully.' => 'Tipo de contrato actualizado correctamente.',
 	'Contractor type deleted successfully.' => 'Tipo de contratista eliminado exitosamente',
-	'The contractor type could not be deleted.'=> 'No se pudo eliminar el tipo de contratista',
+	'The contractor type could not be deleted.' => 'No se pudo eliminar el tipo de contratista',
 
 
 	//insurerentities
@@ -265,8 +334,13 @@ return [
 	'Name' => 'Nombre',
 	'Save Changes' => 'Guarda Cambios',
 
+	'certificate_pending_requests' => 'Solicitudes Pendientes',
+'certificate_approve' => 'Aprobar',
+'certificate_reject' => 'Rechazar',
+'certificate_no_pending' => 'No hay solicitudes pendientes',
+
 	//pensionentities
-	'Pension Entity' => 'Entidad Pension',
+	'Pension Entities' => 'Entidades Pensión',
 	'Create Pension Entity' => 'Crear Entidad Pension',
 	'ID' => 'ID',
 	'Name' => 'Nombre',
@@ -283,6 +357,39 @@ return [
 	'Description' => 'Descripción',
 	'Save Changes' => 'Guarda Cambios',
 
+	
+// General	
+'request' => 'Solicitar',
+
+'welcome to the employment contract page. Here you can manage the employment contracts of contractors.' => 'Bienvenido a la página de contratos laborales. Aquí puedes gestionar los contratos laborales de los contratistas.',
+	'no_data' => 'No hay datos disponibles en la tabla',
+	'Showing _START_ to _END_ of _TOTAL_ entries' => 'Mostrando _START_ a _END_ de _TOTAL_ entradas',
+	'Showing 0 to 0 of 0 entries' => 'Mostrando 0 a 0 de 0 entradas',
+	'Filtered from _MAX_ total entries' => 'Filtrado desde un total de _MAX_ entradas',
+	'First' => 'Primero',
+
+	'Last' => 'Último',
+	'Next' => 'Siguiente',
+	'Previous' => 'Anterior',	
+	'Search:' => 'Buscar:',
+	'Show _MENU_ entries' => 'Mostrar _MENU_ entradas',
+	'Request Certificate' => 'Solicitar Certificado',
+
+
+	'welcome' => 'Bienvenido',
+    'home' => 'Inicio',
+    'back' => 'Volver',
+    'save' => 'Guardar',
+    'cancel' => 'Cancelar',
+    'edit' => 'Editar',
+    'delete' => 'Eliminar',
+    'search' => 'Buscar',
+    'actions' => 'Acciones',
+    'loading' => 'Cargando...',
+    'no_data' => 'No hay datos disponibles',
+    'confirm' => '¿Está seguro?',
+    'yes' => 'Sí',
+    'no' => 'No',
 
 	//Position
 	'View of Grades' => 'Vista de Grados',

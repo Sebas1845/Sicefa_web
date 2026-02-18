@@ -10,13 +10,21 @@ return new class extends Migration {
     Schema::create('motorcycle_assignments', function (Blueprint $table) {
       $table->id();
 
+      // ✅ Vigencia / año de la asignación (CLAVE para cupos por año)
+      // YEAR en MySQL funciona, pero para compatibilidad puedes usar smallInteger.
+      $table->unsignedSmallInteger('assignment_year')->index(); // ej: 2026
+
       $table->unsignedBigInteger('motorcycle_id')->nullable();
       $table->unsignedBigInteger('person_id');
       $table->unsignedBigInteger('area_id');
       $table->unsignedBigInteger('budget_item_id')->nullable();
 
-      // IMPORTANT: custom short index name to avoid MySQL 64-char limit
+      // Directa o por solicitud (TR u otro)
       $table->nullableMorphs('travel_requestable', 'ma_travel_req');
+
+      // ✅ Rango reservado (para solicitudes)
+      $table->timestamp('start_at')->nullable();
+      $table->timestamp('end_at')->nullable();
 
       $table->timestamp('delivered_at')->nullable();
       $table->timestamp('returned_at')->nullable();
@@ -36,6 +44,7 @@ return new class extends Migration {
 
       $table->timestamps();
 
+      // FKs
       $table->foreign('motorcycle_id')->references('id')->on('motorcycles')->nullOnDelete();
       $table->foreign('person_id')->references('id')->on('people')->restrictOnDelete();
       $table->foreign('area_id')->references('id')->on('areas')->restrictOnDelete();
@@ -45,8 +54,11 @@ return new class extends Migration {
       $table->foreign('approved_by')->references('id')->on('users')->nullOnDelete();
       $table->foreign('managed_by')->references('id')->on('users')->nullOnDelete();
 
+      // Índices útiles
+      $table->index(['assignment_year', 'area_id', 'status'], 'ma_year_area_status');
       $table->index(['motorcycle_id', 'status'], 'ma_motorcycle_status');
       $table->index(['person_id', 'status'], 'ma_person_status');
+      $table->index(['motorcycle_id', 'start_at', 'end_at'], 'ma_moto_range');
     });
   }
 

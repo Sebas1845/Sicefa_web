@@ -26,7 +26,6 @@
                     @auth
                         <a href="{{ route('cefa.home') }}">{{ Auth::user()->nickname }}</a>
                         <div class="dropdown-menu">
-                            <a class="dropdown-item" href="{{ route('profile.show') }}">Mi perfil</a>
                             <a class="dropdown-item" href="{{ route('cefa.password.change.index') }}">Cambiar contraseña</a>
 
                             <a class="dropdown-item" href="{{ route('logout') }}"
@@ -66,7 +65,6 @@
                     @auth
                         <a href="{{ route('cefa.home') }}">{{ Auth::user()->nickname }}</a>
                         <ul>
-                            <li><a href="{{ route('profile.show') }}">Mi perfil</a></li>
                             <li><a href="{{ route('cefa.password.change.index') }}">Cambiar contraseña</a></li>
                             <li>
                                 <a href="{{ route('logout') }}" class="d-block"

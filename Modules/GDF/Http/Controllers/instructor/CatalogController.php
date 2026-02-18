@@ -14,8 +14,9 @@ class CatalogController extends BaseOfficialController
         $ctx = session('gdf_context', []);
         $this->assertOfficialContext($ctx);
 
-        $personId = (int) (Auth::user()->person_id ?? 0);
-        if (!$personId) abort(403);
+        $personId = $this->personId();
+        if (!$personId) return response()->json([]);
+
 
         $allowedAreaIds = $this->areaIdsByKey($ctx['area']);
         if (empty($allowedAreaIds)) return response()->json([]);
@@ -92,10 +93,10 @@ class CatalogController extends BaseOfficialController
     }
     public function transportRate(Request $request)
     {
-        $placeType = $request->query('place_type'); // municipio|vereda
-        $transport = $request->query('transport_mode'); // bus|van|air|motorcycle
-        $municipalityId = $request->query('municipality_id');
-        $villageId = $request->query('village_id');
+        $placeType      = $request->query('place_type');        // municipio|vereda
+        $transport      = $request->query('transport_mode');    // bus|van|air|motorcycle
+        $municipalityId = (int) $request->query('municipality_id');
+        $villageId      = (int) $request->query('village_id');
 
         if (!in_array($placeType, ['municipio', 'vereda'], true)) {
             return response()->json(['message' => 'place_type inválido'], 422);
@@ -103,54 +104,51 @@ class CatalogController extends BaseOfficialController
         if (!in_array($transport, ['bus', 'van', 'air', 'motorcycle'], true)) {
             return response()->json(['message' => 'transport_mode inválido'], 422);
         }
-        if (empty($municipalityId)) {
+        if ($municipalityId <= 0) {
             return response()->json(['message' => 'municipality_id requerido'], 422);
         }
-        if ($placeType === 'vereda' && empty($villageId)) {
+        if ($placeType === 'vereda' && $villageId <= 0) {
             return response()->json(['message' => 'village_id requerido'], 422);
         }
 
-        // 1) Resolver nombres desde IDs (según tus tablas reales)
-        $munName = DB::table('municipalities')->where('id', $municipalityId)->value('name');
-        if (!$munName) {
-            return response()->json(['message' => 'municipio no encontrado'], 404);
-        }
-
-        $vilName = null;
-        if ($placeType === 'vereda') {
-            $vilName = DB::table('villages')->where('id', $villageId)->value('name');
-            if (!$vilName) {
-                return response()->json(['message' => 'vereda no encontrada'], 404);
-            }
-        }
-
-        // 2) Obtener monto desde tablas actuales (por ahora solo transport_amount)
-        // Cuando cambies a campos por modo (aereo/bus/moto/camioneta), aquí ajustas.
-        $amount = 0;
+        $rate = null;
+        $source = null;
 
         if ($placeType === 'vereda') {
-            $amount = (float) DB::table('village_rates')
+            $rate = DB::table('village_rates')
+                ->where('village_id', $villageId)
                 ->where('active', 1)
-                ->whereRaw('LOWER(village_name) = ?', [mb_strtolower(trim($vilName))])
                 ->orderByDesc('id')
-                ->value('transport_amount') ?? 0;
+                ->first();
+            $source = 'village_rates';
         } else {
-            $amount = (float) DB::table('municipality_rates')
+            $rate = DB::table('municipality_rates')
+                ->where('municipality_id', $municipalityId)
                 ->where('active', 1)
-                ->whereRaw('LOWER(municipality_name) = ?', [mb_strtolower(trim($munName))])
                 ->orderByDesc('id')
-                ->value('transport_amount') ?? 0;
+                ->first();
+            $source = 'municipality_rates';
         }
 
-        // 3) Gasolina sugerida: por ahora 0 (hasta que tengas consumo/tarifa)
-        // Cuando metas fuel por moto, aquí lo devuelves.
-        $fuelAmount = 0;
+        $baseAmount = 0.0;
+        if ($rate) {
+            $baseAmount = match ($transport) {
+                'bus'        => (float) ($rate->bus_amount ?? 0),
+                'van'        => (float) ($rate->van_amount ?? 0),
+                'motorcycle' => (float) ($rate->motorcycle_amount ?? 0),
+                'air'        => (float) ($rate->air_amount ?? 0), // municipality_rates sí tiene air_amount
+                default      => 0.0,
+            };
+        }
 
         return response()->json([
-            'amount' => $amount,
-            'fuel_amount' => $fuelAmount,
-            'place_type' => $placeType,
-            'transport_mode' => $transport,
+            'base_amount'      => $baseAmount,     // tarifa control (base)
+            'suggested_amount' => $baseAmount,     // sugerida para autollenar
+            'place_type'       => $placeType,
+            'transport_mode'   => $transport,
+            'source'           => $source,
+            'has_rate'         => (bool) $rate,
+            'rate_id'          => (int) ($rate->id ?? 0),
         ]);
     }
 }

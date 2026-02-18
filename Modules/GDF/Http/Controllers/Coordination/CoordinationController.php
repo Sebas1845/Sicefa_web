@@ -6,189 +6,340 @@ use Illuminate\Routing\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Carbon\Carbon;
+use Modules\GDF\Entities\TravelAllowance;
+use Modules\GDF\Entities\TravelCost;
+use Modules\GDF\Entities\TravelSegment;
+use Modules\SICA\Entities\Program;
+use Modules\SIGAC\Entities\ProgramRequest;
+
 
 use Modules\GDF\Entities\TravelRequest;
-use Modules\GDF\Entities\TravelReview;
 
 class CoordinationController extends Controller
 {
-    /**
-     * GET /gdf/academic/review
-     * GET /gdf/campesena/review
-     *
-     * Renderiza la bandeja de Coordinación usando UNA sola vista:
-     * Modules/GDF/Resources/views/coordination/dashboard.blade.php
-     */
+
     public function index(Request $request)
     {
         $areaKey = $this->areaKeyFromPath($request); // academic|campesena
         $this->authorizeByArea($areaKey);
 
-        $q   = trim((string) $request->get('q', ''));
-        $tab = $request->get('tab', 'gdf'); // gdf|sitrav
-        if (!in_array($tab, ['gdf', 'sitrav'], true)) $tab = 'gdf';
+        $routePrefix = $areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic';
+        $title       = $areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica';
 
-        $areaIds = (array) config("gdf.area_groups.$areaKey", []);
-        if (empty($areaIds)) {
-            abort(403, "Área {$areaKey} no configurada en gdf.area_groups.$areaKey");
+        $q = trim((string) $request->get('q', ''));
+
+        $tab = (string) $request->get('tab', 'all'); // all|gdf|sitrav
+        if (!in_array($tab, ['all', 'gdf', 'sitrav'], true)) $tab = 'all';
+
+        $pendingStatuses = ['approved_by_treasury'];
+
+        $query = \Modules\GDF\Entities\TravelRequest::query();
+
+   
+        $with = [];
+
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'person')) {
+            $with[] = 'person:id,first_name,first_last_name,second_last_name,document_number';
+        }
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'municipality')) {
+            $with[] = 'municipality:id,name';
+        }
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'village')) {
+            $with[] = 'village:id,name';
+        }
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'budgetItem')) {
+            $with[] = 'budgetItem:id,code,name';
         }
 
-        // Rubros permitidos por grupo (si aplica)
-        $budgetItemIds = (array) config("gdf.budget_groups.$areaKey", []);
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'allowances')) {
+            $with[] = 'allowances:id,travel_request_id,allowance_type,status,unit_amount,units,calculated_amount,approved_amount,description';
+        }
 
-        /* ===========================
-     | 1) QUERY GDF (SIEMPRE)
-     =========================== */
-        $gdfQuery = TravelRequest::query()
-            ->where('status', 'approved_by_treasury')
-            ->whereIn('area_id', $areaIds)
-            ->when(!empty($budgetItemIds), fn($qq) => $qq->whereIn('budget_item_id', $budgetItemIds));
+        if (method_exists(\Modules\GDF\Entities\TravelRequest::class, 'costs')) {
+            $with[] = 'costs:id,travel_request_id,cost_type,description,amount';
+        }
+
+        if (!empty($with)) $query->with($with);
+
+       
+
+        $this->applyAreaFilter($query, $areaKey);
+
+        if ($this->hasColumn('travel_requests', 'status')) {
+            $query->whereIn('status', $pendingStatuses);
+        }
+
+        if ($this->hasColumn('travel_requests', 'module')) {
+            if ($tab === 'all') {
+                $query->where(function ($w) {
+                    $w->whereNull('module')
+                        ->orWhereRaw('LOWER(module) IN ("gdf","sitrav")');
+                });
+            } else {
+                $query->whereRaw('LOWER(COALESCE(module,"gdf")) = ?', [strtolower($tab)]);
+            }
+        }
 
         if ($q !== '') {
-            $gdfQuery->where(function ($sub) use ($q) {
-                $sub->where('origin', 'like', "%{$q}%")
-                    ->orWhere('destination', 'like', "%{$q}%")
-                    ->orWhere('id', $q);
+            $like = '%' . $q . '%';
+
+            $query->where(function ($sub) use ($q, $like) {
+                if (ctype_digit($q)) {
+                    $sub->orWhere('id', (int)$q);
+                }
+
+                foreach (['origin', 'destination', 'request_type', 'person_type', 'radicado_code'] as $col) {
+                    if ($this->hasColumn('travel_requests', $col)) {
+                        $sub->orWhere($col, 'like', $like);
+                    }
+                }
+
+                foreach (['document_number', 'applicant_name', 'instructor_name'] as $col) {
+                    if ($this->hasColumn('travel_requests', $col)) {
+                        $sub->orWhere($col, 'like', $like);
+                    }
+                }
             });
         }
 
-        // Conteo para badge (sin paginar)
-        $gdfCount = (clone $gdfQuery)->count();
+        if ($this->hasColumn('travel_requests', 'updated_at')) $query->orderByDesc('updated_at');
+        else $query->orderByDesc('id');
 
-        /* ===========================
-     | 2) QUERY SITRAV (PLACEHOLDER / REAL)
-     =========================== */
+        $gdfCount    = $this->countPendingByModule($areaKey, 'gdf', $pendingStatuses);
+        $sitravCount = $this->countPendingByModule($areaKey, 'sitrav', $pendingStatuses);
+        $allCount    = $gdfCount + $sitravCount;
 
-        // Conteo / lista por defecto
-        $sitravCount = 0;
-        $sitravRequests = collect(); // por si no está conectado
+        $requests = $query->paginate(15)->appends($request->query());
 
-        /**
-         * OPCIÓN A (YA TIENES MODEL SITRAV):
-         * Ej: ProgramRequest::query()...
-         *
-         * IMPORTANTE:
-         * - Ajusta nombres de columnas/estados a tu SITRAV real.
-         * - Lo ideal: mapear SITRAV a "area_id" y "budget_item_id" (si ya lo guardas).
-         */
-    /*
-    $sitravQuery = \Modules\SITRAV\Entities\ProgramRequest::query()
-        ->where('status', 'approved_by_treasury') // AJUSTAR
-        ->whereIn('area_id', $areaIds)
-        ->when(!empty($budgetItemIds), fn($qq) => $qq->whereIn('budget_item_id', $budgetItemIds));
+       
+        $budgetMap = [];
 
-    if ($q !== '') {
-        $sitravQuery->where(function ($sub) use ($q) {
-            $sub->where('origin', 'like', "%{$q}%")
-                ->orWhere('destination', 'like', "%{$q}%")
-                ->orWhere('id', $q)
-                ->orWhere('document_number', 'like', "%{$q}%");
-        });
-    }
+        if (!method_exists(\Modules\GDF\Entities\TravelRequest::class, 'budgetItem')) {
+            $budgetIds = $requests->getCollection()
+                ->pluck('budget_item_id')
+                ->filter(fn($v) => (int)$v > 0)
+                ->unique()
+                ->values()
+                ->all();
 
-    $sitravCount = (clone $sitravQuery)->count();
-    */
+            if (!empty($budgetIds) && \Illuminate\Support\Facades\Schema::hasTable('budget_items')) {
+                $rows = \Illuminate\Support\Facades\DB::table('budget_items')
+                    ->select('id', 'code', 'name')
+                    ->whereIn('id', $budgetIds)
+                    ->get();
 
-        /**
-         * OPCIÓN B (AÚN NO HAY MODEL / NO ESTÁ LISTO):
-         * - Deja $sitravRequests vacío, pero ya queda el tab montado.
-         */
-        // $sitravCount = 0;
-        // $sitravRequests = collect();
-
-        /* ===========================
-     | 3) PAGINACIÓN POR TAB ACTIVO
-     =========================== */
-        if ($tab === 'gdf') {
-            $requests = $gdfQuery
-                ->latest('updated_at')
-                ->paginate(15)
-                ->appends(['q' => $q, 'tab' => $tab]);
-
-            // En este tab, SITRAV no pagina (solo badge y placeholder)
-            // $sitravRequests se queda como collect()
-        } else {
-            // Si SITRAV está conectado (Opción A), pagínalo aquí
-            /*
-        $sitravRequests = $sitravQuery
-            ->latest('updated_at')
-            ->paginate(15)
-            ->appends(['q' => $q, 'tab' => $tab]);
-        */
-
-            // Mientras tanto (Opción B), para que no reviente la vista:
-            $sitravRequests = $sitravRequests; // collect()
-
-            // GDF queda como collection vacía en este tab (para no romper la vista)
-            $requests = collect();
+                foreach ($rows as $bi) {
+                    $budgetMap[(int)$bi->id] = trim(($bi->code ?? '') . ' - ' . ($bi->name ?? ''));
+                }
+            }
         }
 
-        $routePrefix = $areaKey === 'academic' ? 'gdf.academic' : 'gdf.campesena';
-        $title = $areaKey === 'academic' ? 'Coordinación Académica' : 'Coordinación Campesena';
+       
+        $requests->getCollection()->transform(function ($r) use ($budgetMap) {
 
-        return view('gdf::coordination.dashboard', [
-            'areaKey'        => $areaKey,
-            'routePrefix'    => $routePrefix,
-            'title'          => $title,
-            'q'              => $q,
-            'tab'            => $tab,
+            // Persona
+            $p = $r->person ?? null;
+            $full = $p ? trim(($p->first_name ?? '') . ' ' . ($p->first_last_name ?? '') . ' ' . ($p->second_last_name ?? '')) : '';
 
-            // GDF
-            'requests'       => $requests,
-            'gdfCount'       => $gdfCount,
+            if ($full === '') $full = (string)($r->applicant_name ?? $r->instructor_name ?? '');
+            if ($full === '') {
+                $pid = (int)($r->person_id ?? 0);
+                $full = $pid > 0 ? 'Persona #' . $pid : '—';
+            }
+            $r->person_display = $full;
 
-            // SITRAV
-            'sitravRequests' => $sitravRequests,
-            'sitravCount'    => $sitravCount,
+            // Rubro
+            if (isset($r->budgetItem) && $r->budgetItem) {
+                $r->rubro_display = trim(($r->budgetItem->code ?? '') . ' - ' . ($r->budgetItem->name ?? 'Rubro'));
+            } else {
+                $bid = (int)($r->budget_item_id ?? 0);
+                $r->rubro_display = $budgetMap[$bid] ?? ($bid > 0 ? 'Rubro #' . $bid : '—');
+            }
+
+            $costTotal = 0.0;
+            if (isset($r->costs) && $r->costs) {
+                $costTotal = (float)$r->costs->sum('amount');
+            }
+
+            $allowTotal = 0.0;
+            if (isset($r->allowances) && $r->allowances) {
+                $active = $r->allowances->whereIn('status', ['draft', 'liquidated', 'approved']);
+
+                $allowTotal = (float)$active->sum(function ($a) {
+                    $v = $a->approved_amount;
+                    if ($v === null || $v === '') $v = $a->calculated_amount;
+                    return (float)$v;
+                });
+            }
+
+            $r->computed_costs = $costTotal;
+            $r->computed_allow = $allowTotal;
+            $r->computed_total = $costTotal + $allowTotal;
+
+            $st = (string)($r->status ?? '');
+            $r->status_code    = $st !== '' ? $st : '—';
+            $r->status_display = \Modules\GDF\Status\TravelStatus::label($st);
+            $r->status_badge   = 'text-bg-' . \Modules\GDF\Status\TravelStatus::badge($st);
+
+            return $r;
+        });
+
+        return view('gdf::coordination.review', [
+            'areaKey'     => $areaKey,
+            'routePrefix' => $routePrefix,
+            'title'       => $title,
+            'q'           => $q,
+            'tab'         => $tab,
+            'gdfCount'    => $gdfCount,
+            'sitravCount' => $sitravCount,
+            'allCount'    => $allCount,
+            'requests'    => $requests,
         ]);
     }
+    private function recalcRequestTotals(int $travelRequestId): void
+    {
+        $costTotal = (float) TravelCost::where('travel_request_id', $travelRequestId)
+            ->when(Schema::hasColumn('travel_costs', 'is_cancelled'), fn($q) => $q->where('is_cancelled', 0))
+            ->sum(Schema::hasColumn('travel_costs', 'amount') ? 'amount' : 'value');
 
+        $allowTotal = (float) TravelAllowance::where('travel_request_id', $travelRequestId)
+            ->whereIn('status', ['draft', 'liquidated', 'approved'])
+            ->sum('calculated_amount');
 
-    /**
-     * POST /gdf/academic/review/{id}/approve
-     * POST /gdf/campesena/review/{id}/approve
-     */
-    public function approve(Request $request, int $id)
+        $grandTotal = $costTotal + $allowTotal;
+
+        $update = [];
+        if ($this->hasColumn('travel_requests', 'total_costs'))    $update['total_costs']    = $costTotal;
+        if ($this->hasColumn('travel_requests', 'total_per_diem')) $update['total_per_diem'] = $allowTotal;
+
+        if ($this->hasColumn('travel_requests', 'total_amount'))   $update['total_amount']   = $grandTotal;
+        if ($this->hasColumn('travel_requests', 'total'))          $update['total']          = $grandTotal;
+
+        if ($update) {
+            TravelRequest::where('id', $travelRequestId)->update($update);
+        }
+    }
+    public function show(Request $request, int $id)
     {
         $areaKey = $this->areaKeyFromPath($request);
         $this->authorizeByArea($areaKey);
 
-        $data = $request->validate([
-            'comment' => ['nullable', 'string', 'max:1500'],
-        ]);
+        $with = [
+            'person:id,first_name,first_last_name,second_last_name,document_number',
+            'area:id,name',
+        ];
 
-        $r = TravelRequest::findOrFail($id);
+        if (method_exists(TravelRequest::class, 'municipality')) $with[] = 'municipality:id,name';
+        if (method_exists(TravelRequest::class, 'village'))      $with[] = 'village:id,name';
+        if (method_exists(TravelRequest::class, 'budgetItem'))   $with[] = 'budgetItem:id,code,name';
 
-        if ($r->status !== 'approved_by_treasury') {
-            return back()->with('error', 'La solicitud no está lista para revisión de Coordinación.');
-        }
-
+        $r = TravelRequest::query()->with($with)->findOrFail($id);
         $this->ensureRequestMatchesArea($r, $areaKey);
 
-        DB::transaction(function () use ($r, $data) {
-            $r->status = 'approved_by_coordinator';
-            $r->coordinator_reviewed_by = Auth::id();
-            $r->coordinator_reviewed_at = now();
-            $r->coordinator_comment = $data['comment'] ?? null;
-            $r->save();
+        $module   = strtolower(trim((string)($r->module ?? 'gdf')));
+        $isSitrav = $module === 'sitrav';
 
-            TravelReview::create([
-                'gdf_request_id' => $r->id,
-                'reviewer_id'    => Auth::id(),
-                'role'           => 'coordination',
-                'action'         => 'approved',
-                'target'         => null,
-                'comments'       => $data['comment'] ?? null,
-            ]);
+        $pr         = null;
+        $program    = null;
+        $sigacRubro = null;
+
+        if ($isSitrav && !empty($r->source_request_id)) {
+            $pr = ProgramRequest::query()
+                ->with([
+                    'municipality:id,name',
+                    'village:id,name',
+                    'budgetItem:id,code,name',
+                    'program:id,name,sofia_code,training_type,program_type,modality,priority_bets',
+                ])
+                ->find((int)$r->source_request_id);
+
+            if ($pr) {
+                $program    = $pr->program ?? null;
+                $sigacRubro = $pr->budgetItem ?? null;
+
+                if (!$program && !empty($pr->program_id) && class_exists(Program::class)) {
+                    $program = Program::select(
+                        'id',
+                        'name',
+                        'sofia_code',
+                        'training_type',
+                        'program_type',
+                        'modality',
+                        'priority_bets'
+                    )->find((int)$pr->program_id);
+                }
+            }
+        }
+
+        $allowances = TravelAllowance::where('travel_request_id', $r->id)->orderBy('id')->get();
+        $segments   = TravelSegment::where('travel_request_id', $r->id)->orderBy('id')->get();
+        $costs      = TravelCost::where('travel_request_id', $r->id)->orderBy('id')->get();
+
+        $costTotal = (float)$costs->sum('amount');
+
+        $activeAllowances = $allowances->whereIn('status', ['draft', 'liquidated', 'approved']);
+        $allowTotal = (float)$activeAllowances->sum(function ($a) {
+            $v = $a->approved_amount;
+            if ($v === null || $v === '') $v = $a->calculated_amount;
+            return (float)$v;
         });
 
-        return back()->with('success', 'Aprobado por Coordinación.');
+        $transport = (float)TravelSegment::where('travel_request_id', $r->id)
+            ->when(Schema::hasColumn('travel_segments', 'is_cancelled'), fn($q) => $q->where('is_cancelled', 0))
+            ->sum('transport_cost');
+
+        foreach ($segments as $s) {
+            if (empty($s->origin))      $s->origin = $r->origin;
+            if (empty($s->destination)) $s->destination = $r->destination;
+        }
+
+        $docs = collect();
+        $docsSource = null;
+
+        if ($isSitrav && $pr && Schema::hasTable('program_request_documents')) {
+
+            $docs = DB::table('program_request_documents')
+                ->selectRaw('id, program_request_id, name AS name, path, created_at')
+                ->whereNull('deleted_at')
+                ->where('program_request_id', (int)$pr->id)
+                ->orderByDesc('id')
+                ->get();
+
+            $docsSource = 'sigac';
+        } elseif (!$isSitrav && Schema::hasTable('travel_request_documents')) {
+
+            $docs = DB::table('travel_request_documents')
+                ->selectRaw('id, travel_request_id, COALESCE(title, original_name, stored_name) AS name, path, created_at')
+                ->whereNull('deleted_at')
+                ->where('travel_request_id', (int)$r->id)
+                ->orderByDesc('id')
+                ->get();
+
+            $docsSource = 'gdf';
+        }
+
+        return view('gdf::coordination.show', [
+            'areaKey'     => $areaKey,
+            'r'           => $r,
+            'pr'          => $pr,
+            'program'     => $program,
+            'sigacRubro'  => $sigacRubro,
+            'allowances'  => $allowances,
+            'segments'    => $segments,
+            'costs'       => $costs,
+            'allowTotal'  => $allowTotal,
+            'costTotal'   => $costTotal,
+            'transport'   => $transport,
+            'grandTotal'  => $allowTotal + $costTotal,
+            'docs'        => $docs,
+            'docsSource'  => $docsSource,
+        ]);
     }
 
-    /**
-     * POST /gdf/academic/review/{id}/return
-     * POST /gdf/campesena/review/{id}/return
-     */
+
+
     public function return(Request $request, int $id)
     {
         $areaKey = $this->areaKeyFromPath($request);
@@ -196,111 +347,356 @@ class CoordinationController extends Controller
 
         $data = $request->validate([
             'target'  => ['required', 'in:support,applicant'],
-            'comment' => ['required', 'string', 'max:1500'],
+            'comment' => ['required', 'string', 'max:2000'],
         ]);
 
-        $r = TravelRequest::findOrFail($id);
+        try {
+            DB::transaction(function () use ($id, $areaKey, $data) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
 
-        if ($r->status !== 'approved_by_treasury') {
-            return back()->with('error', 'La solicitud no está lista para revisión de Coordinación.');
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud ya no está pendiente (status={$r->status}).");
+                }
+
+                $r->status = 'returned';
+
+                if ($this->hasColumn('travel_requests', 'returned_target')) $r->returned_target = $data['target'];
+                if ($this->hasColumn('travel_requests', 'coordination_comment')) $r->coordination_comment = $data['comment'];
+
+                if ($this->hasColumn('travel_requests', 'approved_at')) $r->approved_at = null;
+                if ($this->hasColumn('travel_requests', 'approved_by')) $r->approved_by = null;
+
+                $r->save();
+
+                $this->maybeCreateReview($r->id, 'returned', $data['comment']);
+            });
+
+            return back()->with('success', 'Solicitud devuelta correctamente.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo devolver: ' . $e->getMessage());
         }
-
-        $this->ensureRequestMatchesArea($r, $areaKey);
-
-        DB::transaction(function () use ($r, $data) {
-            $r->status = 'returned';
-            $r->returned_target = $data['target'];
-            $r->coordinator_reviewed_by = Auth::id();
-            $r->coordinator_reviewed_at = now();
-            $r->coordinator_comment = $data['comment'];
-            $r->is_locked = false; // desbloquea para corrección
-            $r->save();
-
-            TravelReview::create([
-                'gdf_request_id' => $r->id,
-                'reviewer_id'    => Auth::id(),
-                'role'           => 'coordination',
-                'action'         => 'returned',
-                'target'         => $data['target'],
-                'comments'       => $data['comment'],
-            ]);
-        });
-
-        return back()->with('success', 'Solicitud devuelta correctamente.');
     }
 
-    /**
-     * POST /gdf/academic/review/{id}/reject
-     * POST /gdf/campesena/review/{id}/reject
-     */
     public function reject(Request $request, int $id)
     {
         $areaKey = $this->areaKeyFromPath($request);
         $this->authorizeByArea($areaKey);
 
         $data = $request->validate([
-            'comment' => ['required', 'string', 'max:1500'],
+            'comment' => ['required', 'string', 'max:2000'],
         ]);
 
-        $r = TravelRequest::findOrFail($id);
+        try {
+            DB::transaction(function () use ($id, $areaKey, $data) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
 
-        if ($r->status !== 'approved_by_treasury') {
-            return back()->with('error', 'La solicitud no está lista para revisión de Coordinación.');
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud ya no está pendiente (status={$r->status}).");
+                }
+
+                $r->status = 'rejected';
+
+                if ($this->hasColumn('travel_requests', 'coordination_comment')) $r->coordination_comment = $data['comment'];
+                if ($this->hasColumn('travel_requests', 'approved_at')) $r->approved_at = null;
+                if ($this->hasColumn('travel_requests', 'approved_by')) $r->approved_by = null;
+
+                $r->save();
+
+                $this->maybeCreateReview($r->id, 'rejected', $data['comment']);
+            });
+
+            return back()->with('success', 'Solicitud rechazada por Coordinación.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo rechazar: ' . $e->getMessage());
+        }
+    }
+
+    /* ========================= HELPERS ========================= */
+
+    protected function hasColumn(string $table, string $column): bool
+    {
+        static $cache = [];
+
+        $key = $table . '.' . $column;
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
         }
 
-        $this->ensureRequestMatchesArea($r, $areaKey);
+        try {
+            $cache[$key] = Schema::hasColumn($table, $column);
+        } catch (\Throwable $e) {
+            $cache[$key] = false;
+        }
 
-        DB::transaction(function () use ($r, $data) {
-            $r->status = 'rejected';
-            $r->coordinator_reviewed_by = Auth::id();
-            $r->coordinator_reviewed_at = now();
-            $r->coordinator_comment = $data['comment'];
-            $r->is_locked = true;
-            $r->save();
-
-            TravelReview::create([
-                'gdf_request_id' => $r->id,
-                'reviewer_id'    => Auth::id(),
-                'role'           => 'coordination',
-                'action'         => 'rejected',
-                'target'         => null,
-                'comments'       => $data['comment'],
-            ]);
-        });
-
-        return back()->with('success', 'Solicitud rechazada por Coordinación.');
+        return $cache[$key];
     }
 
-    /* ===================== Helpers ===================== */
-
-    private function authorizeAcademicOrSupport(): void
+    protected function areaKeyFromPath(Request $request): string
     {
-        if (!function_exists('checkRol')) abort(403);
-        if (!checkRol('gdf.academic_coordinator') && !checkRol('gdf.academic_support')) abort(403);
+        $path = (string) $request->path();
+        return str_contains($path, 'campesena') ? 'campesena' : 'academic';
     }
 
-    private function authorizeCampesenaOrSupport(): void
+    protected function authorizeByArea(string $areaKey): void
     {
-        if (!function_exists('checkRol')) abort(403);
-        if (!checkRol('gdf.campesena_coordinator') && !checkRol('gdf.campesena_support')) abort(403);
+        // Si ya lo cubre middleware, esto puede quedar simple:
+        if (!function_exists('checkRol')) {
+            return;
+        }
+
+        $ok = $areaKey === 'campesena'
+            ? (checkRol('gdf.campesena_coordinator') || checkRol('gdf.campesena_support') || checkRol('gdf.superadmin'))
+            : (checkRol('gdf.academic_coordinator') || checkRol('gdf.academic_support') || checkRol('gdf.superadmin'));
+
+        if (!$ok) {
+            abort(403);
+        }
+    }
+    public function approveAllowance(Request $request, int $id, int $allowanceId)
+    {
+        $areaKey = $this->areaKeyFromPath($request);
+        $this->authorizeByArea($areaKey);
+
+
+        $request->validate([
+            'comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        try {
+            DB::transaction(function () use ($id, $allowanceId, $areaKey, $request) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
+
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud no está en revisión (status={$r->status}).");
+                }
+
+                $a = TravelAllowance::lockForUpdate()
+                    ->where('travel_request_id', $r->id)
+                    ->findOrFail($allowanceId);
+
+                $a->status = 'approved';
+
+                if ($this->hasColumn('travel_allowances', 'reviewed_by')) $a->reviewed_by = Auth::id();
+                if ($this->hasColumn('travel_allowances', 'reviewed_at')) $a->reviewed_at = now();
+                if ($this->hasColumn('travel_allowances', 'coordination_comment')) $a->coordination_comment = $request->comment;
+
+                $a->save();
+
+                $this->recalcRequestTotals($r->id);
+            });
+
+            return back()->with('success', 'Viático aprobado.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo aprobar el viático: ' . $e->getMessage());
+        }
     }
 
-    private function authorizeByArea(string $areaKey): void
+    public function approve(Request $request, int $id)
     {
-        if ($areaKey === 'campesena') $this->authorizeCampesenaOrSupport();
-        else $this->authorizeAcademicOrSupport();
+        $areaKey = $this->areaKeyFromPath($request);
+        $this->authorizeByArea($areaKey);
+
+        $data = $request->validate([
+            'comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        try {
+            DB::transaction(function () use ($id, $areaKey, $data) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
+
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud ya no está pendiente (status={$r->status}).");
+                }
+
+                // ✅ Recalcula (costos + viáticos activos)
+                $this->recalcRequestTotals($r->id);
+
+                // (opcional) Si quieres forzar decisión:
+                // $pending = \Modules\GDF\Entities\TravelAllowance::where('travel_request_id',$r->id)
+                //    ->whereIn('status',['draft','liquidated'])->count();
+                // if($pending>0) throw new \RuntimeException("Hay {$pending} viáticos sin decisión.");
+
+                $r->status = 'approved';
+
+                if ($this->hasColumn('travel_requests', 'approved_at')) $r->approved_at = Carbon::now();
+                if ($this->hasColumn('travel_requests', 'approved_by')) $r->approved_by = Auth::id();
+                if ($this->hasColumn('travel_requests', 'coordination_comment')) $r->coordination_comment = $data['comment'] ?? null;
+
+                if ($this->hasColumn('travel_requests', 'returned_target')) $r->returned_target = null;
+
+                $r->save();
+
+                $this->maybeCreateReview($r->id, 'approved', $data['comment'] ?? null);
+            });
+
+            return back()->with('success', 'Aprobado por Coordinación.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo aprobar: ' . $e->getMessage());
+        }
     }
 
-    private function areaKeyFromPath(Request $request): string
+    public function rejectAllowance(Request $request, int $id, int $allowanceId)
     {
-        return str_contains($request->path(), 'gdf/campesena') ? 'campesena' : 'academic';
+        $areaKey = $this->areaKeyFromPath($request);
+        $this->authorizeByArea($areaKey);
+
+        $request->validate([
+            'comment' => ['required', 'string', 'max:2000'],
+        ]);
+
+        try {
+            DB::transaction(function () use ($id, $allowanceId, $areaKey, $request) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
+
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud no está en revisión (status={$r->status}).");
+                }
+
+                $a = TravelAllowance::lockForUpdate()
+                    ->where('travel_request_id', $r->id)
+                    ->findOrFail($allowanceId);
+
+                $a->status = 'rejected';
+
+                if ($this->hasColumn('travel_allowances', 'reviewed_by')) $a->reviewed_by = Auth::id();
+                if ($this->hasColumn('travel_allowances', 'reviewed_at')) $a->reviewed_at = now();
+                if ($this->hasColumn('travel_allowances', 'coordination_comment')) $a->coordination_comment = $request->comment;
+
+                $a->save();
+
+                $this->recalcRequestTotals($r->id);
+            });
+
+            return back()->with('success', 'Viático declinado.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo declinar el viático: ' . $e->getMessage());
+        }
+    }
+    public function updateAllowance(Request $request, int $id, int $allowanceId)
+    {
+        $areaKey = $this->areaKeyFromPath($request);
+        $this->authorizeByArea($areaKey);
+
+        $data = $request->validate([
+            'calculated_amount' => ['required', 'numeric', 'min:0'],
+            'comment'           => ['required', 'string', 'max:2000'],
+        ]);
+
+        try {
+            DB::transaction(function () use ($id, $allowanceId, $areaKey, $data) {
+                $r = TravelRequest::lockForUpdate()->findOrFail($id);
+                $this->ensureRequestMatchesArea($r, $areaKey);
+
+                if ((string)$r->status !== 'approved_by_treasury') {
+                    throw new \RuntimeException("La solicitud no está en revisión (status={$r->status}).");
+                }
+
+                $a = TravelAllowance::lockForUpdate()
+                    ->where('travel_request_id', $r->id)
+                    ->findOrFail($allowanceId);
+
+                // Guarda original una sola vez si tienes columna
+                if ($this->hasColumn('travel_allowances', 'original_amount') && empty($a->original_amount)) {
+                    $a->original_amount = $a->calculated_amount;
+                }
+
+                $a->calculated_amount = (float) $data['calculated_amount'];
+                $a->status = 'approved'; // si lo modificó, queda aprobado (o liquidated si prefieres)
+
+                if ($this->hasColumn('travel_allowances', 'reviewed_by')) $a->reviewed_by = Auth::id();
+                if ($this->hasColumn('travel_allowances', 'reviewed_at')) $a->reviewed_at = now();
+                if ($this->hasColumn('travel_allowances', 'coordination_comment')) $a->coordination_comment = $data['comment'];
+
+                $a->save();
+
+                $this->recalcRequestTotals($r->id);
+            });
+
+            return back()->with('success', 'Viático modificado.');
+        } catch (\Throwable $e) {
+            return back()->with('error', 'No se pudo modificar el viático: ' . $e->getMessage());
+        }
+    }
+
+
+
+
+    protected function applyAreaFilter($query, string $areaKey): void
+    {
+        // Caso A: columna area_key
+        if ($this->hasColumn('travel_requests', 'area_key')) {
+            $query->whereRaw('LOWER(area_key) = ?', [strtolower($areaKey)]);
+            return;
+        }
+
+        // Caso B: columna area_id + tabla areas
+        if ($this->hasColumn('travel_requests', 'area_id') && Schema::hasTable('areas')) {
+            $query->whereHas('area', function ($q) use ($areaKey) {
+                // ajusta a tu tabla areas: slug/key/name
+                if (Schema::hasColumn('areas', 'slug')) {
+                    $q->whereRaw('LOWER(slug) = ?', [strtolower($areaKey)]);
+                } elseif (Schema::hasColumn('areas', 'key')) {
+                    $q->whereRaw('LOWER(`key`) = ?', [strtolower($areaKey)]);
+                } else {
+                    $q->whereRaw('LOWER(name) LIKE ?', ['%' . $areaKey . '%']);
+                }
+            });
+            return;
+        }
     }
 
     private function ensureRequestMatchesArea(TravelRequest $r, string $areaKey): void
     {
+        if (!$this->hasColumn('travel_requests', 'area_id')) return;
+
         $areaIds = (array) config("gdf.area_groups.$areaKey", []);
+        if (empty($areaIds)) abort(403, "Área {$areaKey} no configurada en gdf.area_groups.$areaKey");
+
         if (!in_array((int)$r->area_id, array_map('intval', $areaIds), true)) {
             abort(403, 'La solicitud no pertenece al área actual.');
+        }
+    }
+
+    protected function countPendingByModule(string $areaKey, string $module, array $pendingStatuses): int
+    {
+        $q = TravelRequest::query();
+
+        $this->applyAreaFilter($q, $areaKey);
+
+        if ($this->hasColumn('travel_requests', 'status')) {
+            $q->whereIn('status', $pendingStatuses);
+        }
+
+        if ($this->hasColumn('travel_requests', 'module')) {
+            $q->whereRaw('LOWER(COALESCE(module,"gdf")) = ?', [strtolower($module)]);
+        } else {
+            // Si no existe columna module, asume todo es GDF
+            if (strtolower($module) !== 'gdf') {
+                return 0;
+            }
+        }
+
+        return (int) $q->count();
+    }
+
+    private function maybeCreateReview(int $requestId, string $action, ?string $comments): void
+    {
+        if (!class_exists(\Modules\GDF\Entities\TravelReview::class)) return;
+
+        try {
+            \Modules\GDF\Entities\TravelReview::create([
+                'travel_request_id' => $requestId,
+                'reviewer_id'       => Auth::id(),
+                'action'            => $action,
+                'comments'          => $comments,
+            ]);
+        } catch (\Throwable $e) {
+            // silent
         }
     }
 }

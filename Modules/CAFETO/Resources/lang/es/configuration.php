@@ -5,11 +5,11 @@ return [
 	'Breadcrumb_Active_Configuration' => 'Configuración',
 
     // Card Generate Ticket Test
-    'Title_Card_Ticket' => 'Generar factura de prueba',
-    'Text_Card_Ticket'  => 'Aquí podrás generar la factura de prueba para verificar si la impresora esta conectada y funciona correctamente, esta se usara para la creación de la factura de venta y la factura de entrada de inventario.',
+    'Title_Card_Ticket' => 'Generar comprobante de prueba',
+    'Text_Card_Ticket'  => 'Aquí podrás generar el comprobante de prueba para verificar si la impresora esta conectada y funciona correctamente, esta se usara para la creación de la factura de venta y la factura de entrada de inventario.',
     
     // Buttons
-    'Btn_Generate_Ticket'  => 'Generar Factura',
+    'Btn_Generate_Ticket'  => 'Generar Comprobante',
 
     //Sweetalerts
     'title'  => 'Error de impresión!',

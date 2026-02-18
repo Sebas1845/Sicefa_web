@@ -55,13 +55,6 @@ Route::middleware(['lang'])->group(function () {
         Route::get('/otp-login/password', [OtpAuthController::class, 'showPasswordChangeForm'])->name('otp.login.password.form');
         Route::post('/otp-login/password', [OtpAuthController::class, 'savePasswordChange'])->name('otp.login.password.save');
 
-        Route::middleware(['auth'])->group(function () {
-
-            Route::get('/profile', [ProfileController::class, 'show'])
-                ->name('profile.show');
-
-            Route::post('/profile/email', [ProfileController::class, 'updateEmail'])
-                ->name('profile.email.update');
-        });
+        
     });
 });

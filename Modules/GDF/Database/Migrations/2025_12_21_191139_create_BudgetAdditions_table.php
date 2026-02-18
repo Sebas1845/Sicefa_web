@@ -10,19 +10,57 @@ class CreateBudgetAdditionsTable extends Migration
     {
         Schema::create('budget_additions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('budget_id')->constrained('budgets')->cascadeOnDelete();
 
+            // Presupuesto afectado
+            $table->foreignId('budget_id')
+                ->constrained('budgets')
+                ->cascadeOnDelete();
+
+            // Valor de la adición
             $table->decimal('amount', 14, 2);
+
+            // Justificación
             $table->text('justification')->nullable();
 
-            $table->foreignId('approved_by')->nullable()->constrained('users');
+            /**
+             * 🔍 AUDITORÍA (CLAVE PARA REPORTES)
+             */
+
+            // Quién creó la adición (Apoyo)
+            $table->foreignId('created_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            // Desde qué área se creó (académica / campesena)
+            $table->foreignId('created_area_id')
+                ->nullable()
+                ->constrained('areas')
+                ->nullOnDelete();
+
+            /**
+             * ✅ APLICACIÓN DE LA ADICIÓN
+             * (cuando se suma al saldo real)
+             */
+
+            $table->foreignId('approved_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
             $table->timestamp('approved_at')->nullable();
 
             $table->timestamps();
 
+            /**
+             * 📌 ÍNDICES PARA CONSULTAS Y REPORTES
+             */
             $table->index(['budget_id', 'approved_at']);
+            $table->index('created_by');
+            $table->index('created_area_id');
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('budget_additions');

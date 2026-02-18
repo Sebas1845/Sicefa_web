@@ -4,12 +4,27 @@
         <li class="nav-item">
             <a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a>
         </li>
+
+        @if (Auth::check() && Auth::user()->havePermission('gth.contractualcertificate.pending'))
+    <a href="{{ route('cefa.contractualcertificate.pending') }}" class="btn btn-primary nav-link "style="color: whitesmoke;">
+        <i class="fas fa-bell" style="color: whitesmoke;"></i>  Solicitudes Pendientes
+        @php
+            $pendingCount = \Modules\GTH\Entities\ContractualCertificate::where('status', 'solicitado')->count();
+        @endphp
+        @if($pendingCount > 0)
+            <span class="badge badge-danger">{{ $pendingCount }}</span>
+        @endif
+    </a>
+@endif
+
         @auth
             @if(checkRol('superadmin') )
                 <li class="nav-item d-none d-sm-inline-block">
                     <a href="{{ route('cefa.index.view') }}" class="nav-link">{{ trans('gth::menu.Home') }}</a>
                 </li>
             @endif
+
+            
             @if (checkRol('gth.admin'))
             <li class="nav-item d-none d-sm-inline-block">
                 <a href="{{ route('gth.admin.index') }}" class="nav-link ">{{ trans('gth::menu.Admin') }}
@@ -28,6 +43,8 @@
                     </a>
                 </li>
             @endif
+
+        
         @endauth
 
         <!--{{--
@@ -58,6 +75,7 @@
 
         </li>
 
+        
 
         <li class="nav-item">
             <a class="nav-link" data-widget="fullscreen" href="#" role="button">

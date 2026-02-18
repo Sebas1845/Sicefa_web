@@ -80,4 +80,9 @@ class SIGACController extends Controller
         $view = ['titlePage'=>trans('sigac::controllers.SIGAC_support_dashboard_title_page'), 'titleView'=>trans('sigac::controllers.SIGAC_support_dashboard_title_view')];
         return view('sigac::index_campesena', $view);
     }
-}   
+
+    public function securitypersonnel_dashboard (){
+        $view = ['titlePage'=>trans('sigac::controllers.SIGAC_securitypersonnel_dashboard_title_page'), 'titleView'=>trans('sigac::controllers.SIGAC_securitypersonnel_dashboard_title_view')];
+        return view('sigac::index_security_personnel', $view);
+    }
+}

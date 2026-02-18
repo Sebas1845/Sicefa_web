@@ -8,16 +8,24 @@
 
   $isOk = function_exists('checkRol')
       ? ($areaKey === 'campesena'
-          ? (checkRol('gdf.campesena_coordinator') || checkRol('gdf.campesena_support'))
-          : (checkRol('gdf.academic_coordinator') || checkRol('gdf.academic_support')))
+          ? (checkRol('gdf.campesena_coordinator') || checkRol('gdf.campesena_support') || checkRol('gdf.superadmin'))
+          : (checkRol('gdf.academic_coordinator') || checkRol('gdf.academic_support') || checkRol('gdf.superadmin')))
       : false;
 
   if(!$isOk){ abort(403); }
 
-  $routePrefix = $routePrefix ?? ($areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic');
+  // ✅ Soporta coordinator y support (como tu flujo actual)
+  $routePrefix = $routePrefix ?? ($areaKey === 'campesena'
+      ? (function_exists('checkRol') && (checkRol('gdf.campesena_support') || checkRol('gdf.superadmin')) ? 'gdf.support.campesena' : 'gdf.campesena')
+      : (function_exists('checkRol') && (checkRol('gdf.academic_support') || checkRol('gdf.superadmin')) ? 'gdf.support.academic' : 'gdf.academic')
+  );
+
   $title = $title ?? ($areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica');
 
   $today = now()->format('Y-m-d');
+
+  // ✅ Vigencia para filtrar rubros desde Budgets (area + year)
+  $year  = (int)($year ?? request('year', now()->year));
 @endphp
 
 <div class="container py-4">
@@ -28,10 +36,13 @@
       <div class="text-muted">
         Flujo: <span class="fw-semibold">Buscar</span> → <span class="fw-semibold">Asignar área/rubros</span> → <span class="fw-semibold">Vínculo</span> (solo si no existe) + notificación.
       </div>
+      <div class="small text-muted mt-1">
+        Vigencia: <span class="fw-semibold">{{ $year }}</span> · Rubros salen de <code>budgets</code> por área + año
+      </div>
     </div>
     <div class="d-flex gap-2">
-      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.people.index') }}">Listado</a>
-      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.review') }}">Volver</a>
+      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.people.index', ['year'=>$year]) }}">Listado</a>
+      <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.dashboard', ['year'=>$year]) }}">Volver</a>
     </div>
   </div>
 
@@ -119,6 +130,9 @@
   <form method="POST" action="{{ route($routePrefix.'.people.store') }}" class="card shadow-sm" id="mainForm">
     @csrf
 
+    {{-- ✅ Year: para validar rubros por budgets (area + year) en store + ajax --}}
+    <input type="hidden" name="year" id="year" value="{{ $year }}">
+
     <div class="card-header fw-semibold">Paso 2) Registrar persona + Asignar área y rubros</div>
     <div class="card-body">
       <div class="row g-3">
@@ -160,19 +174,19 @@
           <select class="form-select" name="area_id" id="area_id" required>
             <option value="">-- Selecciona --</option>
             @foreach($areas as $a)
-              <option value="{{ $a->id }}" @selected((int)old('area_id',$selectedAreaId??null)===(int)$a->id)>
+              <option value="{{ $a->id }}">
                 {{ $a->name }}
               </option>
             @endforeach
           </select>
-          <div class="form-text">Los rubros se filtran por área.</div>
+          <div class="form-text">Los rubros se cargan desde <code>budgets</code> (área + año).</div>
         </div>
 
         <div class="col-md-6">
           <label class="form-label">Rubros / Budget Items</label>
           <select class="form-select" name="budget_item_ids[]" id="budget_item_ids" multiple required size="7">
             @foreach(($budgetItems ?? []) as $b)
-              <option value="{{ $b->id }}" @selected(collect(old('budget_item_ids',[]))->contains($b->id))>
+              <option value="{{ $b->id }}">
                 {{ $b->name }}
               </option>
             @endforeach
@@ -233,8 +247,8 @@
               <div class="col-md-4">
                 <label class="form-label">Modo contrato</label>
                 <select class="form-select" name="contract_mode" id="contract_mode">
-                  <option value="days" @selected(old('contract_mode','days')==='days')>Por días</option>
-                  <option value="hours" @selected(old('contract_mode')==='hours')>Por horas</option>
+                  <option value="days">Por días</option>
+                  <option value="hours">Por horas</option>
                 </select>
               </div>
 
@@ -253,7 +267,7 @@
                 <select class="form-select" name="contractor_type_id" id="contractor_type_id">
                   <option value="">-- Selecciona --</option>
                   @foreach(($contractorTypes ?? []) as $t)
-                    <option value="{{ $t->id }}" @selected((int)old('contractor_type_id')===(int)$t->id)>{{ $t->name }}</option>
+                    <option value=>{{ $t->name }}</option>
                   @endforeach
                 </select>
               </div>
@@ -263,8 +277,8 @@
                 <select class="form-select" name="employee_type_id" id="employee_type_id">
                   <option value="">-- Selecciona --</option>
                   @foreach(($employeeTypes ?? []) as $et)
-                    <option value="{{ $et->id }}" @selected((int)old('employee_type_id')===(int)$et->id)>
-                      {{ $et->name }}@if(isset($et->price)) · ${{ number_format($et->price,0,',','.') }}@endif
+                    <option value="{{ $et->id }}">
+                      {{ $et->name }}
                     </option>
                   @endforeach
                 </select>
@@ -401,6 +415,7 @@
 
               <div class="col-md-6">
                 <label class="form-label">Grado del Funcionario</label>
+                {{-- ✅ tu código tenía input libre; si tienes tabla positions, cámbialo a select --}}
                 <input class="form-control" name="position_id" id="position_id" value="{{ old('position_id') }}">
               </div>
 
@@ -536,21 +551,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyFlowRules(){
     hideAllFlowAlerts();
 
-    // Caso 1: ya es planta
     if(state.employeeExists){
       flowAlertEmployee.classList.remove('d-none');
-
-      // Ocultar campos planta (no pedir)
       employeeFields.classList.add('d-none');
       setRequired(employeeRequiredIds, false);
-
-      // Si el usuario escogió employee, aún así dejamos el select visible, pero no pedimos datos.
-      // Contratista queda según link_type, pero si cambian a contractor, sí se mostraría.
-
-      // Si está como employee, NO forzamos contractor.
     }
 
-    // Caso 2: contrato activo
     if(state.contractorActiveExists){
       flowAlertContractor.classList.remove('d-none');
       if(state.contractorActive){
@@ -559,13 +565,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const ed = state.contractorActive.end_date || '-';
         flowAlertContractorText.textContent = `Contrato activo: ${cn} (${sd} → ${ed}).`;
       }
-
-      // Ocultar campos contratista (no pedir)
       contractorFields.classList.add('d-none');
       setRequired(contractorRequiredIds, false);
     }
 
-    // Alerta: asignación activa en otra área
     const selectedAreaId = document.getElementById('area_id').value;
     if(state.activeAreaAssignment && selectedAreaId){
       if(String(state.activeAreaAssignment.area_id) !== String(selectedAreaId)){
@@ -575,7 +578,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Si no aplica “solo asignar”, entonces mostramos según link_type
     if(!state.employeeExists){
       if(linkType.value === 'employee'){
         employeeFields.classList.remove('d-none');
@@ -588,17 +590,12 @@ document.addEventListener('DOMContentLoaded', () => {
         setRequired(contractorRequiredIds, true);
       }
     }
-
-    // Si el vínculo seleccionado no corresponde, igual respetamos el select pero no forzamos.
-    // Lo importante: required no bloquee.
   }
 
   function toggleFieldsByLinkType(){
-    // Reset básico, luego applyFlowRules decide con estado
     contractorFields.classList.toggle('d-none', linkType.value !== 'contractor');
     employeeFields.classList.toggle('d-none', linkType.value !== 'employee');
 
-    // required por defecto
     setRequired(contractorRequiredIds, linkType.value === 'contractor');
     setRequired(employeeRequiredIds, linkType.value === 'employee');
 
@@ -636,6 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const areaSelect = document.getElementById('area_id');
   const budgetMulti = document.getElementById('budget_item_ids');
+  const yearInput = document.getElementById('year');
 
   function fmtMoney(n){
     if(n === null || n === undefined || n === '') return '-';
@@ -644,16 +642,21 @@ document.addEventListener('DOMContentLoaded', () => {
     return '$ ' + x.toLocaleString('es-CO', { maximumFractionDigits: 0 });
   }
 
+  // ✅ carga rubros filtrados por budgets (area + year)
   async function loadBudgetItemsForArea(areaId){
     if(!areaId){
       budgetMulti.innerHTML = '<option value="">-- Selecciona área primero --</option>';
       return;
     }
 
+    const year = yearInput ? (yearInput.value || '') : '';
     budgetMulti.disabled = true;
     budgetMulti.innerHTML = '<option value="">Cargando...</option>';
 
-    const url = "{{ route($routePrefix.'.budget_items.by_area') }}" + "?area_id=" + encodeURIComponent(areaId);
+    const url = "{{ route($routePrefix.'.budget_items.by_area') }}"
+      + "?area_id=" + encodeURIComponent(areaId)
+      + "&year=" + encodeURIComponent(year);
+
     const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
 
     if(!res.ok){
@@ -667,14 +670,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     budgetMulti.innerHTML = items.length
       ? items.map(i => `<option value="${i.id}">${i.name}</option>`).join('')
-      : '<option value="">No hay rubros habilitados para esta área</option>';
+      : '<option value="">No hay rubros con presupuesto en esta área/vigencia</option>';
 
     budgetMulti.disabled = false;
+  }
+
+  // ✅ Modo contrato: por días vs por horas
+  function toggleContractModeUI(){
+    const mode = (document.getElementById('contract_mode')?.value || 'days');
+    const endBox = document.getElementById('endDateBox');
+    const hoursBox = document.getElementById('hoursBox');
+    const endInput = document.getElementById('contract_end_date');
+    const hoursInput = document.getElementById('amount_hours');
+
+    if(mode === 'hours'){
+      if(endBox) endBox.classList.add('d-none');
+      if(endInput) endInput.removeAttribute('required');
+      if(hoursBox) hoursBox.classList.remove('d-none');
+      if(hoursInput) hoursInput.setAttribute('required','required');
+    } else {
+      if(endBox) endBox.classList.remove('d-none');
+      if(hoursBox) hoursBox.classList.add('d-none');
+      if(hoursInput) hoursInput.removeAttribute('required');
+      // end_date no lo forzamos required (puede ser null)
+    }
   }
 
   // init
   toggleFieldsByLinkType();
   linkType.addEventListener('change', toggleFieldsByLinkType);
+
+  toggleContractModeUI();
+  document.getElementById('contract_mode')?.addEventListener('change', toggleContractModeUI);
 
   if(areaSelect.value){
     loadBudgetItemsForArea(areaSelect.value);
@@ -698,7 +725,13 @@ document.addEventListener('DOMContentLoaded', () => {
     badgeContractorActive.classList.add('d-none');
     noPersonalEmail.classList.add('d-none');
 
-    const url = "{{ route($routePrefix.'.people.search') }}" + "?document_number=" + encodeURIComponent(doc);
+    // ✅ manda area_id para que el backend pueda calcular alertas
+    const areaId = areaSelect.value || '';
+
+    const url = "{{ route($routePrefix.'.people.search') }}"
+      + "?document_number=" + encodeURIComponent(doc)
+      + "&area_id=" + encodeURIComponent(areaId);
+
     const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
     const json = await res.json();
 
@@ -724,9 +757,8 @@ document.addEventListener('DOMContentLoaded', () => {
       contractsBox.innerHTML = '<span class="text-muted">Sin datos</span>';
 
       userBox.classList.remove('d-none');
-      createUser.checked = true;
-      createUser.disabled = false;
-      userHint.textContent = '';
+      if(createUser){ createUser.checked = true; createUser.disabled = false; }
+      if(userHint) userHint.textContent = '';
 
       applyFlowRules();
       return;
@@ -749,35 +781,30 @@ document.addEventListener('DOMContentLoaded', () => {
       noPersonalEmail.classList.remove('d-none');
     }
 
-    // badges vínculo
     if(state.employeeExists) badgeEmployee.classList.remove('d-none');
     if(state.contractorActiveExists) badgeContractorActive.classList.remove('d-none');
 
-    // usuario
     const u = json.user || { exists:false };
     if (u.exists) {
       badgeHasUser.classList.remove('d-none');
       rLogin.textContent = u.email || '-';
 
       userBox.classList.add('d-none');
-      createUser.checked = false;
-      createUser.disabled = true;
-      userHint.textContent = `Ya tiene usuario: ${u.email || ''}.`;
+      if(createUser){ createUser.checked = false; createUser.disabled = true; }
+      if(userHint) userHint.textContent = `Ya tiene usuario: ${u.email || ''}.`;
     } else {
       badgeNoUser.classList.remove('d-none');
       rLogin.textContent = '-';
 
       userBox.classList.remove('d-none');
-      createUser.disabled = false;
-      createUser.checked = true;
+      if(createUser){ createUser.disabled = false; createUser.checked = true; }
 
-      if (!userEmail.value || userEmail.value.trim() === '') {
+      if (userEmail && (!userEmail.value || userEmail.value.trim() === '')) {
         userEmail.value = (p.personal_email || p.misena_email || '');
       }
-      userHint.textContent = '';
+      if(userHint) userHint.textContent = '';
     }
 
-    // assignments
     const assigns = json.assignments || [];
     assignmentsBox.innerHTML = assigns.length ? assigns.map(a => {
       const active = a.is_active ? '<span class="badge bg-success">Activa</span>' : '<span class="badge bg-secondary">Inactiva</span>';
@@ -789,7 +816,6 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
     }).join('') : '<span class="text-muted">No hay asignaciones registradas.</span>';
 
-    // contracts
     const cs = (json.contractor && json.contractor.recent) ? json.contractor.recent : [];
     contractsBox.innerHTML = cs.length ? cs.map(c => {
       const active = c.is_active ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-secondary">Finalizado/Inactivo</span>';

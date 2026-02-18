@@ -4,12 +4,12 @@ namespace Modules\GDF\Http\Controllers\Subdirection;
 
 use Illuminate\Routing\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 use Modules\GDF\Entities\Area;
 use Modules\GDF\Entities\BudgetItem;
 use Modules\GDF\Entities\AreaBudgetItem;
-use Modules\GDF\Entities\BudgetItemYear; // NUEVO (tabla budget_item_years)
 
 class AreaBudgetItemController extends Controller
 {
@@ -20,24 +20,36 @@ class AreaBudgetItemController extends Controller
 
     private function guardSubdirection(): void
     {
-        $isSubdirection = function_exists('checkRol') ? checkRol('gdf.subdirection') : false;
-        if (!$isSubdirection) abort(403);
+        $ok = function_exists('checkRol') && (checkRol('gdf.subdirection') || checkRol('gdf.superadmin'));
+        if (!$ok) abort(403);
+    }
+
+    private function ensureTableOrFail(string $table): void
+    {
+        if (!DB::getSchemaBuilder()->hasTable($table)) {
+            abort(500, "Tabla requerida no existe: {$table}");
+        }
     }
 
     /**
-     * GET: pantalla para configurar rubros permitidos por área
-     * + Filtro por año (vigencia) y carga histórico de años por rubro
+     * GET /gdf/subdirection/areas/{area}/rubros
+     * Route param name MUST be {area}
      */
-    public function edit(Request $request, $areaId)
+    public function edit(Request $request, int $area)
     {
         $this->guardSubdirection();
 
-        $area = Area::findOrFail($areaId);
+        $this->ensureTableOrFail('areas');
+        $this->ensureTableOrFail('budget_items');
+        $this->ensureTableOrFail('area_budget_items');
+        $this->ensureTableOrFail('budgets');
 
-        $q = trim((string)$request->get('q', ''));
-        $year = (int)($request->get('year') ?: now()->year);
+        $area = Area::findOrFail($area);
 
-        // Rubros (catálogo)
+        $q    = trim((string) $request->get('q', ''));
+        $year = (int) ($request->get('year') ?: now()->year);
+
+        // 1) Catálogo de rubros
         $rubros = BudgetItem::query()
             ->when($q !== '', function ($x) use ($q) {
                 $x->where(function ($w) use ($q) {
@@ -49,42 +61,46 @@ class AreaBudgetItemController extends Controller
             ->orderBy('name')
             ->get();
 
-        // Rubros ya asociados al área (incluye active)
-        $current = AreaBudgetItem::where('area_id', $area->id)
-            ->get()
-            ->keyBy('budget_item_id');
-
-        // ==========================
-        // VIGENCIA POR AÑO (budget_item_years)
-        // ==========================
         $rubroIds = $rubros->pluck('id')->all();
 
-        // Estado de vigencia para el año seleccionado
-        $yearRows = BudgetItemYear::query()
-            ->whereIn('budget_item_id', $rubroIds)
-            ->where('year', $year)
+        // 2) Rubros permitidos por área (config)
+        $current = AreaBudgetItem::query()
+            ->where('area_id', $area->id)
             ->get()
             ->keyBy('budget_item_id');
 
-        // Histórico de años por rubro (para mostrar badges/tabla)
-        $historyRows = BudgetItemYear::query()
-            ->whereIn('budget_item_id', $rubroIds)
-            ->orderByDesc('year')
-            ->get()
-            ->groupBy('budget_item_id');
+        // 3) Vigencia por budgets: existe presupuesto activo en ese año/área/rubro
+        $budgetRowsYear = collect();
+        if (!empty($rubroIds)) {
+            $budgetRowsYear = DB::table('budgets')
+                ->select('budget_item_id', 'active', 'initial_amount', 'current_amount')
+                ->where('area_id', $area->id)
+                ->where('year', $year)
+                ->whereIn('budget_item_id', $rubroIds)
+                ->get()
+                ->keyBy('budget_item_id');
+        }
 
-        // Mapa: rubro_id => bool vigente en $year (si no existe fila, asumimos NO vigente)
-        $vigencyMap = collect($rubroIds)->mapWithKeys(function ($id) use ($yearRows) {
-            $row = $yearRows->get($id);
-            return [$id => (bool)($row->active ?? false)];
+        $vigencyMap = collect($rubroIds)->mapWithKeys(function ($id) use ($budgetRowsYear) {
+            $row = $budgetRowsYear->get($id);
+            return [$id => (bool) ($row && (int) ($row->active ?? 0) === 1)];
         });
 
-        // Mapa: rubro_id => Collection rows (year, active, starts_on, ends_on)
-        $historyMap = $historyRows;
+        // 4) Histórico por rubro (para badges/tabla en vista)
+        $historyMap = collect();
+        if (!empty($rubroIds)) {
+            $historyMap = DB::table('budgets')
+                ->select('budget_item_id', 'year', 'active', 'initial_amount', 'current_amount', 'area_id')
+                ->where('area_id', $area->id)
+                ->whereIn('budget_item_id', $rubroIds)
+                ->orderByDesc('year')
+                ->get()
+                ->groupBy('budget_item_id');
+        }
 
-        // Lista de años disponibles para selector (derivada de tabla)
-        // Si no hay datos aún, propone un rango alrededor del año actual.
-        $yearsList = BudgetItemYear::query()
+        // 5) Años disponibles para el selector (desde budgets)
+        $yearsList = DB::table('budgets')
+            ->where('area_id', $area->id)
             ->select('year')
             ->distinct()
             ->orderByDesc('year')
@@ -109,50 +125,48 @@ class AreaBudgetItemController extends Controller
     }
 
     /**
-     * POST: guardar configuración (sync)
-     * - allowed[] = ids de budget_items marcados
-     *
-     * Reglas:
-     * - Si estás trabajando con filtro de año (vigencia), NO permite habilitar rubros
-     *   que NO estén vigentes (active=true) en ese año.
+     * POST /gdf/subdirection/areas/{area}/rubros
+     * Route param name MUST be {area}
      */
-    public function update(Request $request, $areaId)
+    public function update(Request $request, int $area)
     {
         $this->guardSubdirection();
 
-        $area = Area::findOrFail($areaId);
+        $this->ensureTableOrFail('area_budget_items');
+        $this->ensureTableOrFail('budgets');
+        $this->ensureTableOrFail('areas');
+
+        $area = Area::findOrFail($area);
 
         $data = $request->validate([
             'allowed'   => ['nullable', 'array'],
             'allowed.*' => ['integer', 'exists:budget_items,id'],
-
-            // Año usado en la pantalla (para validar vigencia)
             'year'      => ['nullable', 'integer', 'min:2000', 'max:2100'],
         ]);
 
-        $year = (int)($data['year'] ?? now()->year);
+        $year = (int) ($data['year'] ?? now()->year);
 
         $allowedIds = collect($data['allowed'] ?? [])
-            ->map(fn($v) => (int)$v)
+            ->map(fn ($v) => (int) $v)
             ->unique()
             ->values();
 
-        // Validación de negocio: solo permitir rubros vigentes en ese año
+        // Validación: solo rubros con presupuesto activo para ese año/área
         if ($allowedIds->isNotEmpty()) {
-            $vigentes = BudgetItemYear::query()
-                ->whereIn('budget_item_id', $allowedIds->all())
+            $vigentes = DB::table('budgets')
+                ->where('area_id', $area->id)
                 ->where('year', $year)
-                ->where('active', true)
+                ->whereIn('budget_item_id', $allowedIds->all())
+                ->where('active', 1)
                 ->pluck('budget_item_id')
-                ->map(fn($v) => (int)$v);
+                ->map(fn ($v) => (int) $v);
 
             $noVigentes = $allowedIds->diff($vigentes)->values();
 
             if ($noVigentes->isNotEmpty()) {
-                // Puedes listar códigos/nombres si quieres; aquí lo dejo simple y seguro
                 return back()
                     ->withInput()
-                    ->with('error', 'No puedes habilitar rubros que no estén vigentes para el año ' . $year . '. Primero marca su vigencia.');
+                    ->with('error', 'No puedes habilitar rubros sin presupuesto activo para el año ' . $year . ' en esta área.');
             }
         }
 
@@ -161,30 +175,40 @@ class AreaBudgetItemController extends Controller
             // 1) Desactivar todos los existentes del área
             AreaBudgetItem::where('area_id', $area->id)->update([
                 'active'     => false,
-                'updated_by' => auth()->id(),
+                'updated_by' => Auth::id(),
                 'updated_at' => now(),
             ]);
 
             // 2) Activar/crear los seleccionados
             foreach ($allowedIds as $rubroId) {
-                AreaBudgetItem::updateOrCreate(
-                    [
+
+                // si existe, lo reactivamos; si no, lo creamos con created_by
+                $row = AreaBudgetItem::where('area_id', $area->id)
+                    ->where('budget_item_id', $rubroId)
+                    ->first();
+
+                if ($row) {
+                    $row->active = true;
+                    $row->updated_by = Auth::id();
+                    $row->updated_at = now();
+                    $row->save();
+                } else {
+                    AreaBudgetItem::create([
                         'area_id'        => $area->id,
                         'budget_item_id' => $rubroId,
-                    ],
-                    [
-                        'active'     => true,
-                        // conserva created_by si ya existía
-                        'created_by' => DB::raw('COALESCE(created_by,' . (int)auth()->id() . ')'),
-                        'updated_by' => auth()->id(),
-                        'updated_at' => now(),
-                    ]
-                );
+                        'active'         => true,
+                        'created_by'     => Auth::id(),
+                        'updated_by'     => Auth::id(),
+                        'created_at'     => now(),
+                        'updated_at'     => now(),
+                    ]);
+                }
             }
         });
 
+        // ✅ OJO: el nombre del parámetro de ruta es {area}
         return redirect()
-            ->route('gdf.subdirection.area_budget_items.edit', ['areaId' => $area->id, 'year' => $year])
+            ->route('gdf.subdirection.areas.index', ['area' => $area->id, 'year' => $year])
             ->with('success', 'Rubros permitidos actualizados correctamente.');
     }
 }

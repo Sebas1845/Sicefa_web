@@ -1,3 +1,4 @@
+{{-- Modules/GDF/Resources/views/subdirection/areas/index.blade.php --}}
 @extends('gdf::layouts.masteruser')
 @section('title','GDF | Áreas')
 
@@ -133,8 +134,8 @@
                             <td class="text-end">
                                 <div class="d-inline-flex gap-2">
 
-                                    {{-- NUEVO: Configurar rubros por área --}}
-                                    <a href="{{ route('gdf.subdirection.area_budget_items.edit', $a->id) }}"
+                                    {{-- ✅ FIX: la ruta exige {area}, por eso se pasa con key 'area' --}}
+                                    <a href="{{ route('gdf.subdirection.area_budget_items.edit', ['area' => $a->id]) }}"
                                        class="btn btn-sm btn-outline-dark">
                                         Rubros
                                     </a>
@@ -143,57 +144,6 @@
                                        class="btn btn-sm btn-outline-primary">
                                         Editar
                                     </a>
-
-                                    <div class="btn-group">
-                                        <button type="button"
-                                                class="btn btn-sm btn-outline-primary dropdown-toggle"
-                                                data-bs-toggle="dropdown" aria-expanded="false">
-                                            Más
-                                        </button>
-
-                                        <ul class="dropdown-menu dropdown-menu-end">
-                                            <li>
-                                                <a class="dropdown-item"
-                                                   href="{{ route('gdf.subdirection.areas.edit',$a->id) }}">
-                                                    Ver / Editar
-                                                </a>
-                                            </li>
-
-                                            <li>
-                                                <a class="dropdown-item"
-                                                   href="{{ route('gdf.subdirection.area_budget_items.edit', $a->id) }}">
-                                                    Configurar rubros (Área ↔ Rubro)
-                                                </a>
-                                            </li>
-
-                                            <li><hr class="dropdown-divider"></li>
-
-                                            {{-- Activar/Inactivar (requiere rutas y métodos) --}}
-                                            @if($a->active)
-                                                <li>
-                                                    <form method="POST" action="{{ route('gdf.subdirection.areas.deactivate',$a->id) }}">
-                                                        @csrf
-                                                        @method('PATCH')
-                                                        <button class="dropdown-item text-danger"
-                                                                onclick="return confirm('¿Inactivar esta área?')">
-                                                            Inactivar
-                                                        </button>
-                                                    </form>
-                                                </li>
-                                            @else
-                                                <li>
-                                                    <form method="POST" action="{{ route('gdf.subdirection.areas.activate',$a->id) }}">
-                                                        @csrf
-                                                        @method('PATCH')
-                                                        <button class="dropdown-item text-success"
-                                                                onclick="return confirm('¿Activar esta área?')">
-                                                            Activar
-                                                        </button>
-                                                    </form>
-                                                </li>
-                                            @endif
-                                        </ul>
-                                    </div>
                                 </div>
                             </td>
                         </tr>

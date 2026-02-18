@@ -3,110 +3,120 @@
 namespace Modules\CAFETO\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Database\Eloquent\Factory;
+use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Config;
+use Livewire\Livewire;
+use Modules\CAFETO\Http\Livewire\Formulation\SelectProduct;
 
 class CAFETOServiceProvider extends ServiceProvider
 {
     /**
-     * @var string $moduleName
+     * The module name in uppercase.
+     *
+     * @var string
      */
     protected $moduleName = 'CAFETO';
 
     /**
-     * @var string $moduleNameLower
+     * The module name in lowercase.
+     *
+     * @var string
      */
     protected $moduleNameLower = 'cafeto';
 
     /**
-     * Boot the application events.
-     *
-     * @return void
+     * Bootstrap any application services.
      */
-    public function boot()
+    public function boot(Router $router): void
     {
         $this->registerTranslations();
         $this->registerConfig();
         $this->registerViews();
+
         $this->loadMigrationsFrom(module_path($this->moduleName, 'Database/Migrations'));
+
+        // Middleware alias
+        $router->aliasMiddleware(
+            'skip.csrf.formulations',
+            \Modules\CAFETO\Http\Middleware\SkipCsrfForFormulations::class
+        );
+
+        // Livewire components (tag name: <livewire:cafeto.formulation.select-product />)
+        Livewire::component('cafeto.formulation.select-product', SelectProduct::class);
     }
 
     /**
-     * Register the service provider.
-     *
-     * @return void
+     * Register any application services.
      */
-    public function register()
+    public function register(): void
     {
         $this->app->register(RouteServiceProvider::class);
     }
 
     /**
-     * Register config.
-     *
-     * @return void
+     * Register the module's configuration.
      */
-    protected function registerConfig()
+    protected function registerConfig(): void
     {
+        $configPath = module_path($this->moduleName, 'Config/config.php');
+
         $this->publishes([
-            module_path($this->moduleName, 'Config/config.php') => config_path($this->moduleNameLower . '.php'),
+            $configPath => config_path("{$this->moduleNameLower}.php"),
         ], 'config');
-        $this->mergeConfigFrom(
-            module_path($this->moduleName, 'Config/config.php'), $this->moduleNameLower
-        );
+
+        $this->mergeConfigFrom($configPath, $this->moduleNameLower);
     }
 
     /**
-     * Register views.
-     *
-     * @return void
+     * Register the module's views.
      */
-    public function registerViews()
+    protected function registerViews(): void
     {
         $viewPath = resource_path('views/modules/' . $this->moduleNameLower);
-
         $sourcePath = module_path($this->moduleName, 'Resources/views');
 
         $this->publishes([
-            $sourcePath => $viewPath
-        ], ['views', $this->moduleNameLower . '-module-views']);
+            $sourcePath => $viewPath,
+        ], ['views', "{$this->moduleNameLower}-module-views"]);
 
         $this->loadViewsFrom(array_merge($this->getPublishableViewPaths(), [$sourcePath]), $this->moduleNameLower);
     }
 
     /**
-     * Register translations.
-     *
-     * @return void
+     * Register the module's translations.
      */
-    public function registerTranslations()
+    protected function registerTranslations(): void
     {
         $langPath = resource_path('lang/modules/' . $this->moduleNameLower);
 
-        if (is_dir($langPath)) {
-            $this->loadTranslationsFrom($langPath, $this->moduleNameLower);
-        } else {
-            $this->loadTranslationsFrom(module_path($this->moduleName, 'Resources/lang'), $this->moduleNameLower);
-        }
+        $this->loadTranslationsFrom(
+            is_dir($langPath) ? $langPath : module_path($this->moduleName, 'Resources/lang'),
+            $this->moduleNameLower
+        );
     }
 
     /**
      * Get the services provided by the provider.
-     *
-     * @return array
      */
-    public function provides()
+    public function provides(): array
     {
         return [];
     }
 
+    /**
+     * Get the paths for publishable views.
+     */
     private function getPublishableViewPaths(): array
     {
         $paths = [];
-        foreach (\Config::get('view.paths') as $path) {
-            if (is_dir($path . '/modules/' . $this->moduleNameLower)) {
-                $paths[] = $path . '/modules/' . $this->moduleNameLower;
+
+        foreach (Config::get('view.paths', []) as $path) {
+            $moduleViewPath = "{$path}/modules/{$this->moduleNameLower}";
+            if (is_dir($moduleViewPath)) {
+                $paths[] = $moduleViewPath;
             }
         }
+
         return $paths;
     }
 }

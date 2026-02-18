@@ -99,4 +99,8 @@ class ProgramRequest extends Model implements Auditable
     {
         return $this->belongsTo(\Modules\SICA\Entities\Village::class, 'village_id');
     }
+    public function programRequestDates()
+{
+    return $this->hasMany(\Modules\SIGAC\Entities\ProgramRequestDate::class, 'program_request_id');
+}
 }

@@ -25,7 +25,7 @@
                                 @foreach ($contractor as $contract)
                                     <tr>
                                         <td>{{ $loop->iteration }}</td>
-                                        <td>{{ $contract->person->document_type }}</td>
+                                        <td> {{ $contract->person->document_type }}</td>
                                         <td>{{ $contract->person->document_number }}</td>
                                         <td>{{ $contract->person->full_name }}</td>
                                         <form action="{{ route('cefa.gth.contractor.delete', $contract->id) }}"
@@ -36,7 +36,7 @@
                                                 <a href="#" class="btn btn-warning editar-btn" data-bs-toggle="modal"
                                                     data-bs-target="#editarModal_{{ $contract->id }}"
                                                     data-number="{{ $contract->contract_number }}"
-                                                    data-contract-year="{{ $contract->contract_year }}"
+                                                    data-contract-date="{{ $contract->contractDetail->contract_date ?? '' }}"
                                                     data-contract-start-date="{{ $contract->contract_start_date }}"
                                                     data-contract-end-date="{{ $contract->contract_end_date }}"
                                                     data-total-contract-value="{{ $contract->total_contract_value }}"
@@ -105,194 +105,35 @@
                                         </div>
                                         <div class="col-md-3">
                                             <div class="form-group">
-                                                <label for="contract_year-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Contract Year:') }}</label>
-                                                <input type="text" class="form-control"
-                                                    id="contract_year-{{ $contract->id }}" name="contract_year"
-                                                    value="{{ old('contract_year', $contract->contract_year) }}"required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="contract_start_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Contract Start Date:') }}</label>
+                                                <label for="contract_date-{{ $contract->id }}"
+                                                    class="form-label">{{ trans('gth::menu.Contract Date:') }}</label>
                                                 <input type="date" class="form-control"
-                                                    id="contract_start_date-{{ $contract->id }}" name="contract_start_date"
-                                                    value="{{ old('contract_start_date', $contract->contract_start_date) }}"
-                                                    required>
+                                                    id="contract_date-{{ $contract->id }}" name="contract_date"
+                                                    value="{{ old('contract_date', $contract->contractDetail->contract_date ?? '') }}">
+
+
                                             </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="contract_end_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Contract End Date:') }}</label>
-                                                <input type="date" class="form-control"
-                                                    id="contract_end_date-{{ $contract->id }}" name="contract_end_date"
-                                                    value="{{ old('contract_end_date', $contract->contract_end_date) }}"
-                                                    required>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="contract_start_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Contract Start Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="contract_start_date-{{ $contract->id }}"
+                                                        name="contract_start_date"
+                                                        value="{{ old('contract_start_date', $contract->contract_start_date) }}"
+                                                        required>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="card-header">
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="contractor_type_id-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Type of Contract:') }}</label>
-                                                <select name="contractor_type_id" id="contractor_type_id"
-                                                    class="form-control @error('contractor_type_id') is-invalid @enderror"
-                                                    required>
-                                                    @foreach ($contractorTypes as $contractorType)
-                                                        <option value="{{ $contractorType->id }}"
-                                                            {{ $contractorType->id == $contract->contractor_type_id ? 'selected' : '' }}>
-                                                            {{ $contractorType->name }}
-                                                        </option>
-                                                    @endforeach
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="employee_type_id-{{ $contract->id }}" class="form-label">{{ trans('gth::menu.Type of Employee:') }}</label>
-                                                <select name="employee_type_id" id="employee_type_id"
-                                                    class="form-control @error('employee_type_id') is-invalid @enderror"
-                                                    required>
-                                                    @foreach ($employeeTypes as $employeeType)
-                                                        <option value="{{ $employeeType->id }}"
-                                                            {{ $employeeType->id == $contract->employee_type_id ? 'selected' : '' }}>
-                                                            {{ $employeeType->name }}
-                                                        </option>
-                                                    @endforeach
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="amount_hours-{{ $contract->id }}" class="form-label">{{ trans('gth::menu.Hours of Work:') }}</label>
-                                                <input type="text" class="form-control"
-                                                    id="amount_hours-{{ $contract->id }}" name="amount_hours"
-                                                    value="{{ old('amount_hours', $contract->amount_hours) }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="total_contract_value-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Total Contract Value:') }}</label>
-                                                <input type="text" class="form-control"
-                                                    id="total_contract_value-{{ $contract->id }}"
-                                                    name="total_contract_value"
-                                                    value="{{ old('total_contract_value', $contract->total_contract_value) }}"
-                                                    required>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="card-header">
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="policy_issue_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Policy Issuance Date:') }}</label>
-                                                <input type="date" class="form-control"
-                                                    id="policy_issue_date-{{ $contract->id }}" name="policy_issue_date"
-                                                    value="{{ old('policy_issue_date', $contract->policy_issue_date) }}"
-                                                    required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="policy_approval_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Policy Approval Date:') }}</label>
-                                                <input type="date" class="form-control"
-                                                    id="policy_approval_date-{{ $contract->id }}"
-                                                    name="policy_approval_date"
-                                                    value="{{ old('policy_approval_date', $contract->policy_approval_date) }}"
-                                                    required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="policy_effective_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Policy Effective Date:') }}</label>
-                                                <input type="date" class="form-control"
-                                                    id="policy_effective_date-{{ $contract->id }}"
-                                                    name="policy_effective_date"
-                                                    value="{{ old('policy_effective_date', $contract->policy_effective_date) }}"
-                                                    required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="policy_expiration_date-{{ $contract->id }}"
-                                                    class="form-label">{{ trans('gth::menu.Policy Expiration Date:') }}</label>
-                                                <input type="date" class="form-control"
-                                                    id="policy_expiration_date-{{ $contract->id }}"
-                                                    name="policy_expiration_date"
-                                                    value="{{ old('policy_expiration_date', $contract->policy_expiration_date) }}"
-                                                    required>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="card-header">
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="policy_number-{{ $contract->id }}" class="form-label">{{ trans('gth::menu.Policy Number:') }}</label>
-                                                <input type="text" class="form-control"
-                                                    id="policy_number-{{ $contract->id }}" name="policy_number"
-                                                    value="{{ old('policy_number', $contract->policy_number) }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="risk_type">{{ trans('gth::menu.Type of Risk:') }}</label>
-                                                <select name="risk_type" id="risk_type"
-                                                    class="form-control @error('risk_type') is-invalid @enderror" required>
-                                                    <option value="I"
-                                                        {{ old('risk_type', $contract->risk_type) == 'I' ? 'selected' : '' }}>
-                                                        I
-                                                    </option>
-                                                    <option value="II"
-                                                        {{ old('risk_type', $contract->risk_type) == 'II' ? 'selected' : '' }}>
-                                                        II
-                                                    </option>
-                                                    <option value="III"
-                                                        {{ old('risk_type', $contract->risk_type) == 'III' ? 'selected' : '' }}>
-                                                        III
-                                                    </option>
-                                                    <option value="IV"
-                                                        {{ old('risk_type', $contract->risk_type) == 'IV' ? 'selected' : '' }}>
-                                                        IV
-                                                    </option>
-                                                    <option value="V"
-                                                        {{ old('risk_type', $contract->risk_type) == 'V' ? 'selected' : '' }}>
-                                                        V
-                                                    </option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="state">{{ trans('gth::menu.Status:') }}</label>
-                                                <select name="state" id="state"
-                                                    class="form-control @error('state') is-invalid @enderror">
-                                                    <option value="Activo"
-                                                        {{ old('state', $contract->state) === 'Activo' ? 'selected' : '' }}>
-                                                        Activo</option>
-                                                    <option value="Inactivo"
-                                                        {{ old('state', $contract->state) === 'Inactivo' ? 'selected' : '' }}>
-                                                        Inactivo</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="form-group">
-                                                <label for="SIIF_code-{{ $contract->id }}" class="form-label">{{ trans('gth::menu.SIIF code:') }}</label>
-                                                <input type="text" class="form-control"
-                                                    id="SIIF_code-{{ $contract->id }}" name="SIIF_code"
-                                                    value="{{ old('SIIF_code', $contract->SIIF_code) }}" required>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="contract_end_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Contract End Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="contract_end_date-{{ $contract->id }}"
+                                                        name="contract_end_date"
+                                                        value="{{ old('contract_end_date', $contract->contract_end_date) }}"
+                                                        required>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -300,60 +141,234 @@
                                         <div class="row">
                                             <div class="col-md-3">
                                                 <div class="form-group">
-                                                    <label for="assigment_value-{{ $contract->id }}"
-                                                        class="form-label">{{ trans('gth::menu.Assignment Value:') }}</label>
-                                                    <input type="text" class="form-control"
-                                                        id="assigment_valuee-{{ $contract->id }}" name="assigment_value"
-                                                        value="{{ old('assigment_value', $contract->assigment_value) }}"
+                                                    <label for="contractor_type_id-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Type of Contract:') }}</label>
+                                                    <select name="contractor_type_id" id="contractor_type_id"
+                                                        class="form-control @error('contractor_type_id') is-invalid @enderror"
                                                         required>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <div class="form-group">
-                                                    <label for="insurer_entity_id">{{ trans('gth::menu.Insurance Company:') }}</label>
-                                                    <select name="insurer_entity_id" id="insurer_entity_id"
-                                                        class="form-control @error('insurer_entity_id') is-invalid @enderror"
-                                                        required>
-                                                        @foreach ($insurerEntitys as $insurerEntity)
-                                                            <option value="{{ $insurerEntity->id }}"
-                                                                {{ $insurerEntity->id == $contract->insurer_entity_id ? 'selected' : '' }}>
-                                                                {{ $insurerEntity->name }}
+                                                        @foreach ($contractorTypes as $contractorType)
+                                                            <option value="{{ $contractorType->id }}"
+                                                                {{ $contractorType->id == $contract->contractor_type_id ? 'selected' : '' }}>
+                                                                {{ $contractorType->name }}
                                                             </option>
                                                         @endforeach
                                                     </select>
                                                 </div>
                                             </div>
-                                            <div class="card-header">
-                                            <div class="col-md-14">
+                                            <div class="col-md-3">
                                                 <div class="form-group">
-                                                    <label for="contract_object-{{ $contract->id }}"
-                                                        class="form-label">{{ trans('gth::menu.Contract Object:') }}</label>
+                                                    <label for="employee_type_id-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Type of Employee:') }}</label>
+                                                    <select name="employee_type_id" id="employee_type_id"
+                                                        class="form-control @error('employee_type_id') is-invalid @enderror"
+                                                        required>
+                                                        @foreach ($employeeTypes as $employeeType)
+                                                            <option value="{{ $employeeType->id }}"
+                                                                {{ $employeeType->id == $contract->employee_type_id ? 'selected' : '' }}>
+                                                                {{ $employeeType->name }}
+                                                            </option>
+                                                        @endforeach
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="amount_hours-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Hours of Work:') }}</label>
                                                     <input type="text" class="form-control"
-                                                        id="contract_object-{{ $contract->id }}" name="contract_object"
-                                                        value="{{ old('contract_object', $contract->contract_object) }}"
+                                                        id="amount_hours-{{ $contract->id }}" name="amount_hours"
+                                                        value="{{ old('amount_hours', $contract->amount_hours) }}"
                                                         required>
                                                 </div>
                                             </div>
-                                            </div>
-                                            <div class="card-header">
-                                            <div class="col-md-14">
+                                            <div class="col-md-3">
                                                 <div class="form-group">
-                                                    <label for="contract_obligations-{{ $contract->id }}"
-                                                        class="form-label">{{ trans('gth::menu.Contract Obligations:') }}</label>
+                                                    <label for="total_contract_value-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Total Contract Value:') }}</label>
                                                     <input type="text" class="form-control"
-                                                        id="contract_obligations-{{ $contract->id }}"
-                                                        name="contract_obligations"
-                                                        value="{{ old('contract_obligations', $contract->contract_obligations) }}"
+                                                        id="total_contract_value-{{ $contract->id }}"
+                                                        name="total_contract_value"
+                                                        value="{{ old('total_contract_value', $contract->total_contract_value) }}"
                                                         required>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-header">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="policy_issue_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Policy Issuance Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="policy_issue_date-{{ $contract->id }}"
+                                                        name="policy_issue_date"
+                                                        value="{{ old('policy_issue_date', $contract->policy_issue_date) }}"
+                                                        required>
                                                 </div>
-                                            
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="policy_approval_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Policy Approval Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="policy_approval_date-{{ $contract->id }}"
+                                                        name="policy_approval_date"
+                                                        value="{{ old('policy_approval_date', $contract->policy_approval_date) }}"
+                                                        required>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="policy_effective_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Policy Effective Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="policy_effective_date-{{ $contract->id }}"
+                                                        name="policy_effective_date"
+                                                        value="{{ old('policy_effective_date', $contract->policy_effective_date) }}"
+                                                        required>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="policy_expiration_date-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Policy Expiration Date:') }}</label>
+                                                    <input type="date" class="form-control"
+                                                        id="policy_expiration_date-{{ $contract->id }}"
+                                                        name="policy_expiration_date"
+                                                        value="{{ old('policy_expiration_date', $contract->policy_expiration_date) }}"
+                                                        required>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-header">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="policy_number-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.Policy Number:') }}</label>
+                                                    <input type="text" class="form-control"
+                                                        id="policy_number-{{ $contract->id }}" name="policy_number"
+                                                        value="{{ old('policy_number', $contract->policy_number) }}"
+                                                        required>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="risk_type">{{ trans('gth::menu.Type of Risk:') }}</label>
+                                                    <select name="risk_type" id="risk_type"
+                                                        class="form-control @error('risk_type') is-invalid @enderror"
+                                                        required>
+                                                        <option value="I"
+                                                            {{ old('risk_type', $contract->risk_type) == 'I' ? 'selected' : '' }}>
+                                                            I
+                                                        </option>
+                                                        <option value="II"
+                                                            {{ old('risk_type', $contract->risk_type) == 'II' ? 'selected' : '' }}>
+                                                            II
+                                                        </option>
+                                                        <option value="III"
+                                                            {{ old('risk_type', $contract->risk_type) == 'III' ? 'selected' : '' }}>
+                                                            III
+                                                        </option>
+                                                        <option value="IV"
+                                                            {{ old('risk_type', $contract->risk_type) == 'IV' ? 'selected' : '' }}>
+                                                            IV
+                                                        </option>
+                                                        <option value="V"
+                                                            {{ old('risk_type', $contract->risk_type) == 'V' ? 'selected' : '' }}>
+                                                            V
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="state">{{ trans('gth::menu.Status:') }}</label>
+                                                    <select name="state" id="state"
+                                                        class="form-control @error('state') is-invalid @enderror">
+                                                        <option value="Activo"
+                                                            {{ old('state', $contract->state) === 'Activo' ? 'selected' : '' }}>
+                                                            Activo</option>
+                                                        <option value="Inactivo"
+                                                            {{ old('state', $contract->state) === 'Inactivo' ? 'selected' : '' }}>
+                                                            Inactivo</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group">
+                                                    <label for="SIIF_code-{{ $contract->id }}"
+                                                        class="form-label">{{ trans('gth::menu.SIIF code:') }}</label>
+                                                    <input type="text" class="form-control"
+                                                        id="SIIF_code-{{ $contract->id }}" name="SIIF_code"
+                                                        value="{{ old('SIIF_code', $contract->SIIF_code) }}" required>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="card-header">
+                                            <div class="row">
+                                                <div class="col-md-3">
+                                                    <div class="form-group">
+                                                        <label for="assigment_value-{{ $contract->id }}"
+                                                            class="form-label">{{ trans('gth::menu.Assignment Value:') }}</label>
+                                                        <input type="text" class="form-control"
+                                                            id="assigment_valuee-{{ $contract->id }}"
+                                                            name="assigment_value"
+                                                            value="{{ old('assigment_value', $contract->assigment_value) }}"
+                                                            required>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <div class="form-group">
+                                                        <label
+                                                            for="insurer_entity_id">{{ trans('gth::menu.Insurance Company:') }}</label>
+                                                        <select name="insurer_entity_id" id="insurer_entity_id"
+                                                            class="form-control @error('insurer_entity_id') is-invalid @enderror"
+                                                            required>
+                                                            @foreach ($insurerEntitys as $insurerEntity)
+                                                                <option value="{{ $insurerEntity->id }}"
+                                                                    {{ $insurerEntity->id == $contract->insurer_entity_id ? 'selected' : '' }}>
+                                                                    {{ $insurerEntity->name }}
+                                                                </option>
+                                                            @endforeach
+                                                        </select>
+                                                    </div>
+                                                </div>
 
-                                            <!-- Resto del formulario -->
-                                            <button type="submit" class="btn btn-primary"
-                                                onclick="return confirmarCambios()">{{ trans('gth::menu.Save Changes') }}</button>
+                                                <div class="card-header">
+                                                    <div class="col-md-14">
+                                                        <div class="form-group">
+                                                            <label for="contract_object-{{ $contract->id }}"
+                                                                class="form-label">{{ trans('gth::menu.Contract Object:') }}</label>
+                                                            <input type="text" class="form-control"
+                                                                id="contract_object-{{ $contract->id }}"
+                                                                name="contract_object"
+                                                                value="{{ old('contract_object', $contract->contract_object) }}"
+                                                                required>
+                                                        </div>
+                                                    </div>
                                                 </div>
+                                                <div class="card-header">
+                                                    <div class="col-md-14">
+                                                        <div class="form-group">
+                                                            <label for="contract_obligations-{{ $contract->id }}"
+                                                                class="form-label">{{ trans('gth::menu.Contract Obligations:') }}</label>
+                                                            <input type="text" class="form-control"
+                                                                id="contract_obligations-{{ $contract->id }}"
+                                                                name="contract_obligations"
+                                                                value="{{ old('contract_obligations', $contract->contract_obligations) }}"
+                                                                required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+
+                                                <!-- Resto del formulario -->
+                                                <button type="submit" class="btn btn-primary"
+                                                    onclick="return confirmarCambios()">{{ trans('gth::menu.Save Changes') }}</button>
+                                            </div>
                                         </div>
                                     </div>
                             </form>
@@ -451,7 +466,7 @@
         <script>
             Swal.fire({
                 icon: {{ trans('gth::menu.Error!') }},
-                title: {{ trans('gth::menu.Error!') }} ,
+                title: {{ trans('gth::menu.Error!') }},
                 text: {{ session('error') }},
                 showConfirmButton: false,
                 timer: 2000 // Tiempo en milisegundos (2 segundos en este caso)

@@ -7,20 +7,50 @@ use Illuminate\Support\Facades\DB;
 
 class BaseOfficialController extends Controller
 {
-    protected function assertOfficialContext(array $ctx): void
+
+    protected function assertOfficialContext(?array $ctx = null)
     {
+        // si lo pasan, úsalo; si no, toma el de sesión
+        $ctx = $ctx ?? session('gdf_context', []);
         $role = $ctx['role'] ?? null;
         $area = $ctx['area'] ?? null;
 
         if ($role !== 'official' || !in_array($area, ['academic', 'campesena'], true)) {
-            abort(403, 'Contexto inválido para Instructor.');
+            return redirect()->route('gdf.gateway')
+                ->with('warning', 'Selecciona tu área/contexto para continuar.');
         }
+
+        return null;
+    }
+
+    protected function requireOfficialContext()
+    {
+        // reutiliza el alias para no duplicar lógica
+        return $this->assertOfficialContext();
+    }
+
+    protected function ctx(): array
+    {
+        return session('gdf_context', []);
     }
 
     protected function areaIdsByKey(string $areaKey): array
     {
         $ids = (array) config("gdf.area_groups.$areaKey", []);
         return array_values(array_filter(array_map('intval', $ids)));
+    }
+
+    protected function personId(): int
+    {
+        $u = auth()->user();
+        if (!$u) return 0;
+
+        if (!empty($u->person_id)) return (int)$u->person_id;
+
+        if (isset($u->person) && !empty($u->person->id)) return (int)$u->person->id;
+
+        $pid = DB::table('users')->where('id', (int)$u->id)->value('person_id');
+        return $pid ? (int)$pid : 0;
     }
 
     protected function ownerFilter(): array
@@ -32,9 +62,6 @@ class BaseOfficialController extends Controller
         return ['created_by', (int) $userId];
     }
 
-    /**
-     * Gate: entrar vs crear
-     */
     protected function creationGateForCtxArea(string $areaKey, int $graceDays = 8): array
     {
         $userId = auth()->id();
@@ -100,52 +127,71 @@ class BaseOfficialController extends Controller
         return ['can_enter' => true, 'can_create' => true, 'message' => null];
     }
 
-    /**
-     * Rubros permitidos para la persona en las áreas dadas.
-     * Ajusta esta consulta si tu esquema difiere.
-     */
     protected function allowedBudgetItemsForPersonInAreaIds(int $personId, array $areaIds): array
     {
-        $areaIds = array_values(array_filter(array_map('intval', $areaIds)));
-        if (!$personId || empty($areaIds)) return [];
+        $personId = (int)$personId;
+        $areaIds  = array_values(array_filter(array_map('intval', $areaIds)));
 
-        // Si existe asignación persona->área->rubro
+        if ($personId <= 0 || empty($areaIds)) return [];
+
+        $today = now()->toDateString();
+
         $rows = DB::table('person_area_budget_assignments as paba')
             ->join('budget_items as bi', 'bi.id', '=', 'paba.budget_item_id')
             ->where('paba.person_id', $personId)
-            ->where('paba.is_active', 1)
             ->whereIn('paba.area_id', $areaIds)
+            ->where('paba.is_active', 1)
+
+            ->where(function ($q) use ($today) {
+                $q->whereNull('paba.start_date')
+                    ->orWhereDate('paba.start_date', '<=', $today);
+            })
+            ->where(function ($q) use ($today) {
+                $q->whereNull('paba.end_date')
+                    ->orWhereDate('paba.end_date', '>=', $today);
+            })
+
             ->whereNotNull('paba.budget_item_id')
-            ->select('bi.id', DB::raw("COALESCE(bi.code,'') as code"), 'bi.name')
+
+            ->select(
+                'bi.id',
+                DB::raw("COALESCE(bi.code,'') as code"),
+                'bi.name'
+            )
+            ->distinct()
             ->orderBy('bi.name')
             ->get();
-
-        // Fallback (si no hay asignación por persona): rubros del área
-        if ($rows->isEmpty()) {
-            $rows = DB::table('area_budget_items as abi')
-                ->join('budget_items as bi', 'bi.id', '=', 'abi.budget_item_id')
-                ->whereIn('abi.area_id', $areaIds)
-                ->where('abi.active', 1)
-                ->select('bi.id', DB::raw("COALESCE(bi.code,'') as code"), 'bi.name')
-                ->orderBy('bi.name')
-                ->get();
-        }
 
         return $rows->toArray();
     }
 
-    /**
-     * Motos activas para la persona (si existe una asignación entregada/aprobada).
-     * Ajusta estados y tabla según tu esquema.
-     */
+
     protected function activeMotorcycleAssignmentForPerson(int $personId, array $areaIds = []): ?object
     {
         $q = DB::table('motorcycle_assignments as ma')
+            ->leftJoin('motorcycles as m', 'm.id', '=', 'ma.motorcycle_id')
             ->where('ma.person_id', $personId)
-            ->whereIn('ma.status', ['approved', 'delivered']);
+            ->whereNull('ma.returned_at')
+            ->whereIn('ma.status', [
+                'approved',     // ✅ CLAVE (TU CASO)
+                'delivered',
+                'active',
+                'assigned',
+                'entregado'
+            ]);
 
-        if (!empty($areaIds)) $q->whereIn('ma.area_id', array_map('intval', $areaIds));
+        if (!empty($areaIds)) {
+            $q->whereIn('ma.area_id', array_map('intval', $areaIds));
+        }
 
-        return $q->orderByDesc('ma.id')->first();
+        return $q->orderByDesc('ma.id')
+            ->select([
+                'ma.*',
+                'm.plate',
+                'm.brand',
+                'm.model',
+                'm.current_odometer',
+            ])
+            ->first();
     }
 }

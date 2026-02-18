@@ -172,52 +172,7 @@
 
                         </li>
                         <!-- Submódulo Visitas (Coordinación Académica) -->
-                        <li class="nav-item">
-                            <a href="#" class="nav-link">
-                                <i class="fa-solid fa-person-walking"></i>
-                                <p>
-                                    Rondas de Ambientes<i class="right fas fa-angle-left"></i>
-                                </p>
-                            </a>
-                            <ul class="nav nav-treeview items" style="display: none;">
-                                @if (Auth::user()->havePermission('sigac.coordinador.environment_rounds.index'))
-                                    <li class="nav-item">
-                                        <a href="{{ route('sigac.coordinador.environment_rounds.index') }}"
-                                            class="nav-link {{ Route::is('sigac.coordinador.environment_rounds.*') ? 'active' : '' }}">
-                                            <i class="fa-solid fa-person-walking"></i>
-                                            <p>Rondas</p>
-                                        </a>
-                                    </li>
-                                @endif
-                                @if (Auth::user()->havePermission('sigac.coordinador.environment_rounds.create'))
-                                    <li class="nav-item">
-                                        <a href="{{ route('sigac.coordinador.environment_rounds.index') }}?openPanel=create"
-                                            class="nav-link {{ request()->get('openPanel') == 'create' ? 'active' : '' }}">
-                                            <i class="fa-solid fa-circle-plus"></i>
-                                            <p>Crear / Abrir Ronda</p>
-                                        </a>
-                                    </li>
-                                @endif
-                                @if (Auth::user()->havePermission('sigac.coordinador.environment_incidents.index'))
-                                    <li class="nav-item">
-                                        <a href="{{ route('sigac.coordinador.environment_incidents.index') }}"
-                                            class="nav-link {{ Route::is('sigac.coordinador.environment_incidents.*') ? 'active' : '' }}">
-                                            <i class="fa-solid fa-triangle-exclamation"></i>
-                                            <p>Novedades</p>
-                                        </a>
-                                    </li>
-                                @endif
-                                @if (Auth::user()->havePermission('sigac.coordinador.environment_keys.give'))
-                                    <li class="nav-item">
-                                        <a href="{{ route('sigac.coordinador.environment_keys.index') }}?openPanel=keys"
-                                            class="nav-link {{ request()->get('openPanel') == 'keys' ? 'active' : '' }}">
-                                            <i class="fa-solid fa-key"></i>
-                                            <p>Control de Llaves</p>
-                                        </a>
-                                    </li>
-                                @endif
-                                {{-- Si en el futuro deseas añadir otras opciones (reportes, etc.), colócalas aquí --}}
-                            </ul>
+                        
 
                         </li>
 
@@ -504,7 +459,8 @@
                             </a>
                             <ul class="nav nav-treeview items">
                                 <li class="nav-item">
-                                    <a href="{{ route('sigac.tutor.PermissionValidation.index') }}" class="nav-link">
+                                    <a href="{{ route('sigac.campesena.programming.program_request.table') }}"
+                                        class="nav-link">
                                         <i class="nav-icon fas fa-file-invoice"></i>
                                         <p>Solicitudes</p>
                                     </a>
@@ -1031,7 +987,7 @@
                                 </li>
                             @endif
                         @endif
-                    @endif  
+                    @endif
                 </ul>
             </nav>
             <!-- /.sidebar-menu -->

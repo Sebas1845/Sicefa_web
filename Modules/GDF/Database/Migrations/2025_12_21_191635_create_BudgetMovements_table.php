@@ -1,65 +1,55 @@
 <?php
 
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 
-class CreateBudgetMovementsTable extends Migration
+return new class extends Migration
 {
     public function up(): void
     {
         Schema::create('budget_movements', function (Blueprint $table) {
-            $table->id();
+            $table->bigIncrements('id');
 
-            // Budget dueño del movimiento
-            $table->foreignId('budget_id')
-                ->constrained('budgets')
-                ->cascadeOnDelete();
+            $table->unsignedBigInteger('budget_id');
+            $table->unsignedBigInteger('area_id')->nullable();          // área ORIGEN que hizo el movimiento
+            $table->unsignedBigInteger('travel_request_id')->nullable();
 
-            // Área sobre la cual se ejecuta (para sumar ejecutado por área)
-            // Nullable para movimientos globales (si existieran)
-            $table->foreignId('area_id')
-                ->nullable()
-                ->constrained('areas')
-                ->nullOnDelete();
+            $table->string('module', 20)->nullable(); // gdf|sitrav|etc
 
-            // Solicitud asociada (si aplica)
-            $table->foreignId('travel_request_id')
-                ->nullable()
-                ->constrained('travel_requests')
-                ->nullOnDelete();
-
-            // Módulo (para dividir el cupo por GDF/SITRAV)
-            // Lo dejo string para no pelear con enum en mysql si cambias a futuro
-            $table->string('module', 20)->nullable(); // gdf|sitrav
-
-            // Tipo de movimiento
-            // Se agrega execute para tus descuentos por solicitud
-            $table->enum('type', [
-                'addition',     // suma (adición)
-                'commitment',   // compromiso/reserva (si lo usas)
-                'reversal',     // reversión
-                'adjustment',   // ajuste manual
-                'execute',      // EJECUCIÓN real (descuento)
-            ]);
+            $table->enum('type', ['addition','commitment','reversal','adjustment','execute']);
 
             $table->decimal('amount', 14, 2);
             $table->text('description')->nullable();
 
-            // Usuario que creó el movimiento
-            $table->foreignId('created_by')
-                ->constrained('users')
-                ->cascadeOnDelete();
+            // quién hizo el movimiento
+            $table->unsignedBigInteger('created_by');
 
-            // Mantienes created_at manual como lo tenías
+            // Referencia genérica del origen (para adiciones y otros)
+            $table->string('source_type', 30)->nullable(); // budget_addition|travel_request|manual|etc
+            $table->unsignedBigInteger('source_id')->nullable();
+
+            // Solo created_at (como tu tabla)
             $table->timestamp('created_at')->useCurrent();
 
-            // Índices para consultas típicas
-            $table->index(['budget_id', 'type'], 'idx_budget_mov_budget_type');
-            $table->index(['budget_id', 'area_id'], 'idx_budget_mov_budget_area');
-            $table->index(['budget_id', 'module'], 'idx_budget_mov_budget_module');
-            $table->index(['budget_id', 'area_id', 'module', 'type'], 'idx_budget_mov_budget_area_module_type');
-            $table->index(['travel_request_id'], 'idx_budget_mov_travel_request');
+            // Índices
+            $table->index('budget_id');
+            $table->index('area_id');
+            $table->index('travel_request_id');
+            $table->index('created_by');
+            $table->index(['source_type', 'source_id']);
+
+            // Foreign keys (SIN nombre manual)
+            $table->foreign('budget_id')->references('id')->on('budgets')->onDelete('cascade');
+
+            // Ajusta tabla areas si aplica
+            $table->foreign('area_id')->references('id')->on('areas')->onDelete('set null');
+
+            // Ajusta tabla travel_requests si aplica
+            $table->foreign('travel_request_id')->references('id')->on('travel_requests')->onDelete('set null');
+
+            // Ajusta si created_by apunta a people
+            $table->foreign('created_by')->references('id')->on('users')->onDelete('restrict');
         });
     }
 
@@ -67,4 +57,4 @@ class CreateBudgetMovementsTable extends Migration
     {
         Schema::dropIfExists('budget_movements');
     }
-}
+};

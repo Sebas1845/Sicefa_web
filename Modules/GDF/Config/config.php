@@ -26,4 +26,22 @@ return [
 
     'country_id' => 25,
     'default_department_id' => 0,
+
+
+    'allowances' => [
+        'status_labels' => [
+            'draft' => 'Borrador',
+            'liquidated' => 'Liquidado',
+            'approved' => 'Aprobado',
+            'rejected' => 'Rechazada por apoyo',
+        ],
+        'type_labels' => [
+            'meals' => 'Comidas',
+            'lodging' => 'Hospedaje',
+            'fuel' => 'Combustible',
+            'other' => 'Otro',
+            'per_diem' => 'Viático diario',
+        ],
+    ],
+
 ];

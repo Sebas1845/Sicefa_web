@@ -22,7 +22,7 @@ return [
     'Btn_Register_Sale'   => 'Registrar Venta',
     'Btn_Register_Client' => 'Registrar Cliente',
     'Btn_Cancel_Register' => 'Cancelar',
-    'Btn_Generate_Ticket' => 'Generar Factura',
+    'Btn_Generate_Ticket' => 'Generar Comprobante',
     'Btn_Accept'          => 'Aceptar',
     
 	// Section optional text

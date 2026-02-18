@@ -2058,6 +2058,222 @@ class PermissionsTableSeeder extends Seeder
 
         $permissions_academic_coordination[] = $permission->id;
 
+        // ========================================
+        // PERMISOS FALTANTES IDENTIFICADOS
+        // ========================================
+
+        // Estos permisos parecen estar referenciados en rutas pero no están completos en el seeder:
+
+        // 1. CAMPESENA (se menciona en searchvillages pero no hay sección completa)
+        $permissions_campesena = [];
+
+        // Vista principal CAMPESENA
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.dashboard'], [
+            'name' => 'Panel de control de CAMPESENA',
+            'description' => 'Panel de control para el rol CAMPESENA',
+            'description_english' => 'CAMPESENA control panel',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        // Programación CAMPESENA
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.index'], [
+            'name' => 'Programación de horarios (CAMPESENA)',
+            'description' => 'Acceder a la vista de programación de horarios',
+            'description_english' => 'Access to programming schedules view',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        // Solicitud de programa CAMPESENA
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.index'], [
+            'name' => 'Vista solicitar programa (CAMPESENA)',
+            'description' => 'Acceder a la vista de la solicitud de programas de formación',
+            'description_english' => 'Access the view of the application for training programs',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.table'], [
+            'name' => 'Tabla solicitar programa (CAMPESENA)',
+            'description' => 'Acceder a la tabla de la solicitud de programas de formación',
+            'description_english' => 'Access the table of the application for training programs',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.store'], [
+            'name' => 'Registrar solicitud del programa (CAMPESENA)',
+            'description' => 'Realizar el registro de la solicitud del programa',
+            'description_english' => 'Register the program application',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.searchprofession'], [
+            'name' => 'Consultar profesión del instructor (CAMPESENA)',
+            'description' => 'Consultar profesión del instructor',
+            'description_english' => "Consult the instructor's profession",
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.searchempresa'], [
+            'name' => 'Consultar empresa (CAMPESENA)',
+            'description' => 'Consultar la empresa',
+            'description_english' => 'Consult the company',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.searchapplicant'], [
+            'name' => 'Consultar solicitador (CAMPESENA)',
+            'description' => 'Consultar el solicitador',
+            'description_english' => 'Consult the requester',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.document_store'], [
+            'name' => 'Cargar documentos de la solicitud del programa (CAMPESENA)',
+            'description' => 'Cargar los documentos de la solicitud del programa',
+            'description_english' => 'Upload your program application documents',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.program_request_download'], [
+            'name' => 'Descargar documentos de la solicitud del programa (CAMPESENA)',
+            'description' => 'Descargar los documentos de la solicitud del programa',
+            'description_english' => 'Download the program application documents',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.program_request_devolve'], [
+            'name' => 'Devolver solicitud del programa (CAMPESENA)',
+            'description' => 'Devolver la solicitud del programa para correcciones',
+            'description_english' => 'Return the program application for corrections',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.program_request_reject'], [    
+            'name' => 'Rechazar solicitud del programa (CAMPESENA)',
+            'description' => 'Rechazar la solicitud del programa',
+            'description_english' => 'Reject the program application',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.campesena.programming.program_request.approve'], [
+            'name' => 'Aprobar solicitud del programa (CAMPESENA)',
+            'description' => 'Aprobar la solicitud del programa',
+            'description_english' => 'Approve the program application',
+            'app_id' => $app->id
+        ]);
+        $permissions_campesena[] = $permission->id;
+
+        // ========================================
+        // 2. PERSONAL DE SEGURIDAD - PERMISOS COMPLETOS
+        // ========================================
+
+        // Ya están estos permisos básicos, pero faltan algunos complementarios:
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.securitystaff.visits.checkin'], [
+            'name' => 'Registrar entrada de visitantes (Personal de Seguridad)',
+            'description' => 'Permite registrar el check-in de visitantes',
+            'description_english' => 'Allows registering visitor check-in',
+            'app_id' => $app->id
+        ]);
+        $permissions_security_personnel[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.securitystaff.visits.checkout'], [
+            'name' => 'Registrar salida de visitantes (Personal de Seguridad)',
+            'description' => 'Permite registrar el check-out de visitantes',
+            'description_english' => 'Allows registering visitor check-out',
+            'app_id' => $app->id
+        ]);
+        $permissions_security_personnel[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.securitystaff.visits.search'], [
+            'name' => 'Buscar visitas programadas (Personal de Seguridad)',
+            'description' => 'Permite buscar y consultar visitas programadas',
+            'description_english' => 'Allows searching and consulting scheduled visits',
+            'app_id' => $app->id
+        ]);
+        $permissions_security_personnel[] = $permission->id;
+
+        // ========================================
+        // 3. PERMISOS DE BIENESTAR - EVIDENCIA
+        // ========================================
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.bienestar.PermissionValidation.evidence'], [
+            'name' => 'Ver evidencia enviada en solicitudes de permisos (Bienestar)',
+            'description' => 'Permite al personal de Bienestar ver la evidencia de los permisos realizados por los aprendices',
+            'description_english' => 'Allows wellness staff to see evidence of permits taken by apprentices',
+            'app_id' => $app->id
+        ]);
+        $permissions_wellness[] = $permission->id;
+
+        // ========================================
+        // 4. COORDINACIÓN ACADÉMICA - EVIDENCIA
+        // ========================================
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.coordinador.PermissionValidation.evidence'], [
+            'name' => 'Ver evidencia enviada en solicitudes de permisos (Coordinador Académico)',
+            'description' => 'Permite al Coordinador Académico ver la evidencia de los permisos realizados por los aprendices',
+            'description_english' => 'Allows the academic coordinator to see evidence of permits taken by apprentices',
+            'app_id' => $app->id
+        ]);
+        $permissions_academic_coordination[] = $permission->id;
+
+        // ========================================
+        // 5. INSTRUCTOR - PERMISOS DE VISITAS
+        // ========================================
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.instructor.visits.calendar'], [
+            'name' => 'Ver calendario de visitas (Instructor)',
+            'description' => 'Permite al instructor ver el calendario de visitas asignadas',
+            'description_english' => 'Allows instructor to view assigned visits calendar',
+            'app_id' => $app->id
+        ]);
+        $permissions_instructor[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.instructor.visits.events'], [
+            'name' => 'Ver eventos de visitas (Instructor)',
+            'description' => 'Permite al instructor ver los eventos de visitas',
+            'description_english' => 'Allows instructor to view visit events',
+            'app_id' => $app->id
+        ]);
+        $permissions_instructor[] = $permission->id;
+
+        // ========================================
+        // 6. CARACTERIZACIÓN - PERMISOS FALTANTES
+        // ========================================
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.support.programming.program_request.characterization.update'], [
+            'name' => 'Actualizar caracterización del programa (Apoyo)',
+            'description' => 'Permite actualizar la caracterización del programa de formación',
+            'description_english' => 'Allows updating the training program characterization',
+            'app_id' => $app->id
+        ]);
+        $permissions_support[] = $permission->id;
+
+        $permission = Permission::updateOrCreate(['slug' => 'sigac.support.programming.program_request.characterization.view'], [
+            'name' => 'Ver caracterización del programa (Apoyo)',
+            'description' => 'Permite ver los detalles de la caracterización del programa',
+            'description_english' => 'Allows viewing training program characterization details',
+            'app_id' => $app->id
+        ]);
+        $permissions_support[] = $permission->id;
+
+        // ========================================
+        // ASIGNACIÓN AL ROL CAMPESENA
+        // ========================================
+
+        // Al final del seeder, agregar:
+        // $rol_campesena = Role::where('slug', 'sigac.campesena')->firstOrFail();
 
 
 
@@ -2077,6 +2293,7 @@ class PermissionsTableSeeder extends Seeder
         $rol_apprentice             = Role::where('slug', 'sigac.apprentice')->firstOrFail();          // Rol Aprendiz
         $rol_support                = Role::where('slug', 'sigac.support')->firstOrFail();             // Rol Apoyo
         $rol_security_personnel     = Role::where('slug', 'sigac.security.personnel')->firstOrFail();   // Rol Personal de Seguridad
+        $rol_campesena             = Role::where('slug', 'sigac.campesena')->firstOrFail();          // Rol Campesena
 
 
         // Asignación de PERMISOS a los ROLES (sin eliminar relaciones existentes)
@@ -2087,6 +2304,7 @@ class PermissionsTableSeeder extends Seeder
         $rol_wellness->permissions()->syncWithoutDetaching($permissions_wellness);
         $rol_support->permissions()->syncWithoutDetaching($permissions_support);
         $rol_security_personnel->permissions()->syncWithoutDetaching($permissions_security_personnel); // ✅ Nuevo rol agregado
+        $rol_campesena->permissions()->syncWithoutDetaching($permissions_campesena); // ✅ Nuevo rol agregado
 
 
     }

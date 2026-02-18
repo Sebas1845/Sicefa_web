@@ -5,6 +5,7 @@ namespace Modules\GTH\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Eloquent\Factory;
 
+
 class GTHServiceProvider extends ServiceProvider
 {
     /**

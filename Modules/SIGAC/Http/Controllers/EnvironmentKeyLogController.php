@@ -2,12 +2,10 @@
 
 namespace Modules\SIGAC\Http\Controllers;
 
-use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 use Modules\SIGAC\Entities\EnvironmentKeyLog;
-use Modules\SIGAC\Entities\EnvironmentRoundEntry;
 
 class EnvironmentKeyLogController extends Controller
 {
@@ -18,7 +16,7 @@ class EnvironmentKeyLogController extends Controller
         $titlePage = "Control de Llaves";
         $titleView = "Control de Llaves";
 
-        // PROGRAMACIÓN DEL DÍA
+        // ✅ PROGRAMACIÓN DEL DÍA (sale de instructor_programs)
         $schedules = DB::table('instructor_programs AS ip')
             ->join('courses AS c', 'c.id', '=', 'ip.course_id')
             ->leftJoin('programs AS pr', 'pr.id', '=', 'c.program_id')
@@ -39,6 +37,7 @@ class EnvironmentKeyLogController extends Controller
                 'p.first_name',
                 'p.first_last_name',
             ])
+            ->orderByRaw('env.name IS NULL') // primero los que sí tienen ambiente
             ->orderBy('env.name')
             ->orderBy('ip.start_time')
             ->get();
@@ -46,14 +45,13 @@ class EnvironmentKeyLogController extends Controller
         $scheduledCoursesCount      = $schedules->pluck('ficha')->filter()->unique()->count();
         $scheduledEnvironmentsCount = $schedules->pluck('environment_id')->filter()->unique()->count();
 
+        // ✅ ESTADOS DE LLAVES (si usas la tabla environment_key_logs)
         $rawKeyLogs = EnvironmentKeyLog::whereDate('taken_at', $date)->get();
 
         $keyStates = $rawKeyLogs
             ->groupBy('schedule_id')
             ->map(function ($logs) {
-                // último movimiento por horario
                 $last = $logs->sortByDesc('taken_at')->first();
-
                 return [
                     'delivered_at' => $last?->taken_at,
                     'returned_at'  => $last?->returned_at,
@@ -63,40 +61,27 @@ class EnvironmentKeyLogController extends Controller
         $keysGivenToday  = $keyStates->filter(fn($s) => $s['delivered_at'])->count();
         $keysNotReturned = $keyStates->filter(fn($s) => $s['delivered_at'] && !$s['returned_at'])->count();
 
-        // RONDAS (solo para stats)
-        $roundEntries = EnvironmentRoundEntry::with('round')
-            ->whereHas('round', function ($q) use ($date) {
-                $q->whereDate('date', $date);
-            })
-            ->get();
-
-        $totalEntries = $roundEntries->count();
-        $entriesWithIssuesCount = $roundEntries->filter(function ($e) {
-            return $e->is_dirty
-                || $e->ac_status === 'DAÑADO'
-                || (is_string($e->other_issues) && trim($e->other_issues) !== '');
-        })->count();
-        $attendanceOk     = $roundEntries->where('attendance_status', 'OK')->count();
-        $attendanceIssues = $totalEntries - $attendanceOk;
-
-        // LISTA DE AMBIENTES PARA EL MODAL
+        // ✅ LISTA DE AMBIENTES PARA EL MODAL
         $environments = DB::table('environments')->orderBy('name')->get(['id', 'name']);
 
         return view('sigac::keylogs.index', [
-            'titlePage'                 => $titlePage,
-            'titleView'                 => $titleView,
-            'date'                      => $date,
-            'schedules'                 => $schedules,
-            'keyStates'                 => $keyStates,
-            'scheduledCoursesCount'     => $scheduledCoursesCount,
+            'titlePage'                  => $titlePage,
+            'titleView'                  => $titleView,
+            'date'                       => $date,
+            'schedules'                  => $schedules,
+            'keyStates'                  => $keyStates,
+            'scheduledCoursesCount'      => $scheduledCoursesCount,
             'scheduledEnvironmentsCount' => $scheduledEnvironmentsCount,
-            'keysGivenToday'            => $keysGivenToday,
-            'keysNotReturned'           => $keysNotReturned,
-            'totalEntries'              => $totalEntries,
-            'entriesWithIssuesCount'    => $entriesWithIssuesCount,
-            'attendanceOk'              => $attendanceOk,
-            'attendanceIssues'          => $attendanceIssues,
-            'environments'              => $environments,
+            'keysGivenToday'             => $keysGivenToday,
+            'keysNotReturned'            => $keysNotReturned,
+
+            // ✅ si tu vista mostraba stats de rondas, las dejamos en 0 para no romperla
+            'totalEntries'               => 0,
+            'entriesWithIssuesCount'     => 0,
+            'attendanceOk'               => 0,
+            'attendanceIssues'           => 0,
+
+            'environments'               => $environments,
         ]);
     }
 
@@ -106,47 +91,34 @@ class EnvironmentKeyLogController extends Controller
             'schedule_id' => 'required|integer',
         ]);
 
-        $scheduleId = $request->schedule_id;
+        $scheduleId = (int) $request->schedule_id;
 
-        // 1) Validar que el schedule exista
         $schedule = DB::table('instructor_programs')->where('id', $scheduleId)->first();
         if (!$schedule) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'La programación seleccionada no existe.',
-            ], 404);
+            return response()->json(['ok' => false, 'message' => 'La programación seleccionada no existe.'], 404);
         }
 
-        // 2) Validar que tenga ambiente asignado
         $envLink = DB::table('environment_instructor_programs')
             ->where('instructor_program_id', $scheduleId)
             ->first();
 
         if (!$envLink) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'Primero debe asignar un ambiente antes de entregar la llave.',
-            ], 422);
+            return response()->json(['ok' => false, 'message' => 'Primero debe asignar un ambiente antes de entregar la llave.'], 422);
         }
 
-        // 3) Validar que no haya una llave "abierta" (returned_at = null)
         $openLog = EnvironmentKeyLog::where('schedule_id', $scheduleId)
             ->whereNull('returned_at')
             ->orderBy('taken_at', 'desc')
             ->first();
 
         if ($openLog) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'Ya hay una llave entregada para esta programación y no ha sido registrada como devuelta.',
-            ], 409);
+            return response()->json(['ok' => false, 'message' => 'Ya hay una llave entregada para esta programación y no ha sido registrada como devuelta.'], 409);
         }
 
-        // 4) Registrar entrega (usando el esquema viejo: given_by, taken_at, returned_at)
         EnvironmentKeyLog::create([
             'schedule_id'    => $scheduleId,
             'environment_id' => $envLink->environment_id,
-            'instructor_id'  => null, // si quieres puedes inferirlo
+            'instructor_id'  => null,
             'given_by'       => auth()->id(),
             'taken_at'       => now(),
             'returned_at'    => null,
@@ -155,26 +127,21 @@ class EnvironmentKeyLogController extends Controller
         return response()->json(['ok' => true]);
     }
 
-
     public function returnKey(Request $request)
     {
         $request->validate([
             'schedule_id' => 'required|integer',
         ]);
 
-        $scheduleId = $request->schedule_id;
+        $scheduleId = (int) $request->schedule_id;
 
-        // Buscar el último préstamo abierto de ese horario
         $openLog = EnvironmentKeyLog::where('schedule_id', $scheduleId)
             ->whereNull('returned_at')
             ->orderBy('taken_at', 'desc')
             ->first();
 
         if (!$openLog) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'No hay una llave entregada pendiente por devolver.',
-            ], 409);
+            return response()->json(['ok' => false, 'message' => 'No hay una llave entregada pendiente por devolver.'], 409);
         }
 
         $openLog->update([
@@ -184,7 +151,6 @@ class EnvironmentKeyLogController extends Controller
         return response()->json(['ok' => true]);
     }
 
-
     public function changeEnvironment(Request $request)
     {
         $request->validate([
@@ -192,10 +158,10 @@ class EnvironmentKeyLogController extends Controller
             'environment_id' => 'nullable|integer',
         ]);
 
-        $scheduleId    = $request->schedule_id;
-        $environmentId = $request->environment_id;
+        $scheduleId    = (int) $request->schedule_id;
+        $environmentId = $request->environment_id ? (int) $request->environment_id : null;
 
-        // Si lo dejan POR DEFINIR, solo borramos la asignación
+        // ✅ quitar asignación
         if (!$environmentId) {
             DB::table('environment_instructor_programs')
                 ->where('instructor_program_id', $scheduleId)
@@ -204,19 +170,12 @@ class EnvironmentKeyLogController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        // Tomar la clase base
-        $schedule = DB::table('instructor_programs')
-            ->where('id', $scheduleId)
-            ->first();
-
+        $schedule = DB::table('instructor_programs')->where('id', $scheduleId)->first();
         if (!$schedule) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'La programación seleccionada no existe.',
-            ], 404);
+            return response()->json(['ok' => false, 'message' => 'La programación seleccionada no existe.'], 404);
         }
 
-        // Validar que el ambiente NO esté ocupado en ese mismo horario
+        // ✅ validar ocupado (cruce de horarios en el mismo día)
         $conflict = DB::table('instructor_programs AS ip')
             ->join('environment_instructor_programs AS eip', 'eip.instructor_program_id', '=', 'ip.id')
             ->where('eip.environment_id', $environmentId)
@@ -233,16 +192,12 @@ class EnvironmentKeyLogController extends Controller
             ->exists();
 
         if ($conflict) {
-            return response()->json([
-                'ok'      => false,
-                'message' => 'Ese ambiente ya está ocupado en ese horario.',
-            ], 409);
+            return response()->json(['ok' => false, 'message' => 'Ese ambiente ya está ocupado en ese horario.'], 409);
         }
 
-        // Guardar/actualizar la relación
         DB::table('environment_instructor_programs')->updateOrInsert(
             ['instructor_program_id' => $scheduleId],
-            ['environment_id'        => $environmentId]
+            ['environment_id' => $environmentId]
         );
 
         return response()->json(['ok' => true]);

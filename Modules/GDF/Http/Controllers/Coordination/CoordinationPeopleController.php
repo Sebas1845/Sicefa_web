@@ -27,9 +27,7 @@ use Modules\GDF\Entities\BudgetItem;
 
 class CoordinationPeopleController extends Controller
 {
-    /* =========================================================
-     |  LISTADO POR RUBROS (index + detalle)
-     * ========================================================= */
+   
 
     public function index(Request $request)
     {
@@ -44,6 +42,8 @@ class CoordinationPeopleController extends Controller
         $budgetItemId = (int) $request->get('budget_item_id', 0);
         $onlyActive   = ((int)$request->get('only_active', 1) === 1);
 
+        $year = (int) $request->get('year', now()->year);
+
         $areas = Area::query()
             ->whereIn('id', $allowedAreaIds)
             ->orderBy('name')
@@ -54,15 +54,16 @@ class CoordinationPeopleController extends Controller
         }
         if ($areaId <= 0) abort(403, 'No hay áreas disponibles.');
 
-        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($areaId);
+        // ✅ AHORA: rubros permitidos salen de budgets (por area + year)
+        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($areaId, $year);
 
         $budgetItems = BudgetItem::query()
             ->whereIn('id', $allowedBudgetItemIds ?: [-1])
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $routePrefix = $areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic';
-        $title       = $areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica';
+        $routePrefix = $this->routePrefixByRole($areaKey);
+        $title       = $this->titleByArea($areaKey);
 
         // DETALLE por rubro
         if ($budgetItemId > 0) {
@@ -85,6 +86,7 @@ class CoordinationPeopleController extends Controller
                 'budgetItemId',
                 'onlyActive',
                 'q',
+                'year',
                 'detail'
             ));
         }
@@ -124,22 +126,16 @@ class CoordinationPeopleController extends Controller
             'budgetItemId',
             'onlyActive',
             'q',
+            'year',
             'grouped'
         ));
     }
 
-    /**
-     * Alias para rutas existentes (evita "Call to undefined method").
-     * Si ya lo estás usando en routes: people/by-rubro
-     */
     public function peopleByRubroIndex(Request $request)
     {
         return $this->index($request);
     }
 
-    /* =========================================================
-     |  FORM CREATE
-     * ========================================================= */
 
     public function create(Request $request)
     {
@@ -148,6 +144,8 @@ class CoordinationPeopleController extends Controller
 
         $allowedAreaIds = $this->allowedAreaIds($areaKey);
         if (empty($allowedAreaIds)) abort(403, 'No hay áreas configuradas para tu rol.');
+
+        $year = (int) $request->get('year', now()->year);
 
         $areas = Area::query()
             ->whereIn('id', $allowedAreaIds)
@@ -159,7 +157,8 @@ class CoordinationPeopleController extends Controller
             $selectedAreaId = (int) ($areas->first()->id ?? 0);
         }
 
-        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($selectedAreaId);
+        // ✅ rubros permitidos salen de budgets (area + year)
+        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($selectedAreaId, $year);
 
         $budgetItems = BudgetItem::query()
             ->whereIn('id', $allowedBudgetItemIds ?: [-1])
@@ -177,8 +176,8 @@ class CoordinationPeopleController extends Controller
             $positions = collect();
         }
 
-        $routePrefix = $areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic';
-        $title       = $areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica';
+        $routePrefix = $this->routePrefixByRole($areaKey);
+        $title       = $this->titleByArea($areaKey);
 
         return view('gdf::coordination.creatpeople', compact(
             'areaKey',
@@ -187,6 +186,7 @@ class CoordinationPeopleController extends Controller
             'selectedAreaId',
             'routePrefix',
             'title',
+            'year',
             'contractorTypes',
             'employeeTypes',
             'insurers',
@@ -195,7 +195,7 @@ class CoordinationPeopleController extends Controller
     }
 
     /* =========================================================
-     |  AJAX: rubros por area
+     |  AJAX: rubros por area (desde budgets)
      * ========================================================= */
 
     public function budgetItemsByArea(Request $request)
@@ -207,14 +207,17 @@ class CoordinationPeopleController extends Controller
 
         $data = $request->validate([
             'area_id' => ['required', 'integer'],
+            'year'    => ['nullable', 'integer'],
         ]);
 
         $areaId = (int) $data['area_id'];
+        $year   = (int) ($data['year'] ?? now()->year);
+
         if (!in_array($areaId, $allowedAreaIds, true)) {
             return response()->json(['ok' => false, 'items' => []], 403);
         }
 
-        $ids = $this->allowedBudgetItemIdsByArea($areaId);
+        $ids = $this->allowedBudgetItemIdsByArea($areaId, $year);
 
         $items = BudgetItem::query()
             ->whereIn('id', $ids ?: [-1])
@@ -235,7 +238,7 @@ class CoordinationPeopleController extends Controller
 
         $data = $request->validate([
             'document_number' => ['required', 'string', 'max:30'],
-            'area_id'         => ['nullable', 'integer'], // para alertas por área
+            'area_id'         => ['nullable', 'integer'],
         ]);
 
         $doc = trim($data['document_number']);
@@ -249,18 +252,19 @@ class CoordinationPeopleController extends Controller
                 'person' => null,
                 'user' => ['exists' => false],
                 'employee' => ['exists' => false],
-                'contractor' => ['has_active' => false, 'active_contract' => null],
-                'suggested_mode' => 'new', // no existe
+                'contractor' => [
+                    'active'  => ['exists' => false, 'contract' => null],
+                    'recent'  => [],
+                ],
                 'alerts' => [],
-                'contracts' => [],
                 'assignments' => [],
+                'active_area_assignment' => null,
             ]);
         }
 
         $user = User::where('person_id', $person->id)->first();
         $employee = Employee::where('person_id', $person->id)->first();
 
-        // Contratos recientes (máx 10)
         $contracts = Contractor::where('person_id', $person->id)
             ->orderByDesc('contract_start_date')
             ->limit(10)
@@ -271,13 +275,13 @@ class CoordinationPeopleController extends Controller
                 $isActive = (($c->state ?? 'Activo') === 'Activo') && $isActiveByDates;
 
                 return [
-                    'id'              => $c->id,
-                    'contract_number' => $c->contract_number,
-                    'contract_year'   => $c->contract_year,
-                    'start_date'      => $c->contract_start_date,
-                    'end_date'        => $c->contract_end_date,
-                    'state'           => $c->state,
-                    'is_active'       => $isActive,
+                    'id'                => $c->id,
+                    'contract_number'   => $c->contract_number,
+                    'contract_year'     => $c->contract_year,
+                    'start_date'        => $c->contract_start_date,
+                    'end_date'          => $c->contract_end_date,
+                    'state'             => $c->state,
+                    'is_active'         => $isActive,
                     'total_contract_value' => $c->total_contract_value,
                 ];
             })
@@ -285,7 +289,6 @@ class CoordinationPeopleController extends Controller
 
         $activeContract = $contracts->firstWhere('is_active', true);
 
-        // Asignaciones recientes (máx 15)
         $assignments = DB::table('person_area_budget_assignments as a')
             ->leftJoin('areas as ar', 'ar.id', '=', 'a.area_id')
             ->leftJoin('budget_items as bi', 'bi.id', '=', 'a.budget_item_id')
@@ -308,38 +311,25 @@ class CoordinationPeopleController extends Controller
             ->limit(15)
             ->get();
 
-        // Deducir "área activa" desde asignación activa
-        $activeAssignAreaId = (int) optional($assignments->firstWhere('is_active', 1))->area_id;
+        $activeAreaAssign = $assignments->firstWhere('is_active', 1);
 
-        // Construir alertas + modo sugerido
+        $active_area_assignment = $activeAreaAssign ? [
+            'area_id' => (int)($activeAreaAssign->area_id ?? 0),
+            'area_name' => (string)($activeAreaAssign->area_name ?? ''),
+        ] : null;
+
+        // alerts (opcional, por si quieres mostrarlas luego)
         $alerts = [];
 
         if ($employee) {
-            $suggestedMode = 'existing_employee';
-            $alerts[] = [
-                'type' => 'info',
-                'text' => 'La persona ya existe como PLANTA (employees). Solo se asignará área y rubros.',
-            ];
+            $alerts[] = ['type' => 'info', 'text' => 'La persona ya existe como PLANTA (employees).'];
         } elseif ($activeContract) {
-            $suggestedMode = 'existing_contractor_active';
-            $alerts[] = [
-                'type' => 'info',
-                'text' => 'La persona tiene CONTRATO ACTIVO. Solo se asignará área y rubros (no se creará contrato nuevo).',
-            ];
-
-            if ($areaId > 0 && $activeAssignAreaId > 0 && $activeAssignAreaId !== $areaId) {
-                $alerts[] = [
-                    'type' => 'warning',
-                    'text' => 'Alerta: tiene una asignación activa en otra área. Aun así puedes asignar a esta área.',
-                    'meta' => ['active_area_id' => $activeAssignAreaId, 'current_area_id' => $areaId],
-                ];
+            $alerts[] = ['type' => 'info', 'text' => 'La persona tiene CONTRATO ACTIVO.'];
+            if ($areaId > 0 && $active_area_assignment && (int)$active_area_assignment['area_id'] !== $areaId) {
+                $alerts[] = ['type' => 'warning', 'text' => 'Tiene asignación activa en otra área.'];
             }
         } else {
-            $suggestedMode = 'new';
-            $alerts[] = [
-                'type' => 'warning',
-                'text' => 'No se detecta planta ni contrato activo. Debes registrar vínculo (planta o contratista).',
-            ];
+            $alerts[] = ['type' => 'warning', 'text' => 'No se detecta planta ni contrato activo. Debes registrar vínculo.'];
         }
 
         return response()->json([
@@ -359,27 +349,30 @@ class CoordinationPeopleController extends Controller
                 'email'    => $user->email,
                 'nickname' => $user->nickname,
             ] : ['exists' => false],
-            'employee' => $employee ? [
-                'exists'           => true,
-                'id'               => $employee->id,
-                'state'            => $employee->state ?? null,
-                'employee_type_id' => $employee->employee_type_id ?? null,
-                'position_id'      => $employee->position_id ?? null,
-            ] : ['exists' => false],
+            'employee' => $employee ? ['exists' => true] : ['exists' => false],
+
+            // ✅ compatible con tu JS
             'contractor' => [
-                'has_active' => (bool) $activeContract,
-                'active_contract' => $activeContract, // puede ser null
+                'active' => [
+                    'exists' => (bool)$activeContract,
+                    'contract' => $activeContract ? [
+                        'id' => $activeContract['id'] ?? null,
+                        'contract_number' => $activeContract['contract_number'] ?? null,
+                        'start_date' => $activeContract['start_date'] ?? null,
+                        'end_date' => $activeContract['end_date'] ?? null,
+                    ] : null,
+                ],
+                'recent' => $contracts->all(),
             ],
-            'suggested_mode' => $suggestedMode,
+
             'alerts' => $alerts,
-            'contracts' => $contracts,
             'assignments' => $assignments,
+            'active_area_assignment' => $active_area_assignment,
         ]);
     }
 
-
     /* =========================================================
-     |  STORE (crea persona/usuario/contrato/asignación + correo)
+     |  STORE (tu store actual, solo ajustado el allowedBudgetItemIdsByArea con year)
      * ========================================================= */
 
     public function store(Request $request)
@@ -405,6 +398,9 @@ class CoordinationPeopleController extends Controller
             'second_last_name' => ['nullable', 'string', 'max:120'],
             'personal_email'   => ['nullable', 'email', 'max:255'],
             'misena_email'     => ['nullable', 'email', 'max:255'],
+
+            // ✅ Vigencia (para filtrar budgets)
+            'year' => ['nullable', 'integer'],
 
             // Asignación
             'area_id'           => ['required', 'integer'],
@@ -444,8 +440,8 @@ class CoordinationPeopleController extends Controller
             // Employee (planta)
             'employee_contract_number'     => ['nullable', 'integer'],
             'contract_date'                => ['nullable', 'date'],
-            'professional_card_number'     => ['nullable', 'string', 'max:255'], // opcional
-            'professional_card_issue_date' => ['nullable', 'date'],              // opcional
+            'professional_card_number'     => ['nullable', 'string', 'max:255'],
+            'professional_card_issue_date' => ['nullable', 'date'],
             'employee_type_id_planta'      => ['nullable', 'integer'],
             'position_id'                  => ['nullable', 'integer'],
             'risk_type_employee'           => ['nullable', Rule::in(['I', 'II', 'III', 'IV', 'V'])],
@@ -466,17 +462,20 @@ class CoordinationPeopleController extends Controller
             'send_email' => ['nullable', 'boolean'],
         ]);
 
+        $year = (int)($data['year'] ?? now()->year);
+
         $areaId = (int) $data['area_id'];
         if (!in_array($areaId, $allowedAreaIds, true)) {
             return back()->withInput()->with('error', 'Área inválida para tu rol.');
         }
 
-        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($areaId);
-        $budgetItemIds = array_values(array_unique(array_map('intval', $data['budget_item_ids'] ?? [])));
+        // ✅ AHORA: validación de rubros contra budgets (area + year)
+        $allowedBudgetItemIds = $this->allowedBudgetItemIdsByArea($areaId, $year);
 
+        $budgetItemIds = array_values(array_unique(array_map('intval', $data['budget_item_ids'] ?? [])));
         foreach ($budgetItemIds as $bid) {
             if (!in_array($bid, $allowedBudgetItemIds, true)) {
-                return back()->withInput()->with('error', 'Uno de los rubros seleccionados no está habilitado para el área.');
+                return back()->withInput()->with('error', 'Uno de los rubros seleccionados NO tiene presupuesto en Budgets para esta área/vigencia.');
             }
         }
 
@@ -498,7 +497,6 @@ class CoordinationPeopleController extends Controller
                 $assigmentVal,
                 $sendEmail
             ) {
-
                 // 1) Persona
                 $person = Person::updateOrCreate(
                     ['document_number' => $data['document_number']],
@@ -512,8 +510,6 @@ class CoordinationPeopleController extends Controller
                 );
 
                 $existingUser = User::where('person_id', $person->id)->first();
-
-                // 2) Detectar existencia real
                 $existingEmployee = Employee::where('person_id', $person->id)->first();
 
                 $activeContractor = Contractor::query()
@@ -527,22 +523,18 @@ class CoordinationPeopleController extends Controller
 
                 $contractorId = $activeContractor ? (int)$activeContractor->id : null;
 
-                // 2) Employee / Contractor (REGLA: si ya existe vínculo, NO pedir datos)
+                // 2) Employee / Contractor
                 if ($data['link_type'] === 'employee') {
 
-                    // si YA es planta, no exigimos ni actualizamos datos
                     if (!$existingEmployee) {
-
                         $missing = [];
-                        foreach (
-                            [
-                                'employee_contract_number',
-                                'contract_date',
-                                'employee_type_id_planta',
-                                'position_id',
-                                'risk_type_employee',
-                            ] as $k
-                        ) {
+                        foreach ([
+                            'employee_contract_number',
+                            'contract_date',
+                            'employee_type_id_planta',
+                            'position_id',
+                            'risk_type_employee',
+                        ] as $k) {
                             if (empty($data[$k])) $missing[] = $k;
                         }
                         if ($missing) {
@@ -554,8 +546,8 @@ class CoordinationPeopleController extends Controller
                             [
                                 'contract_number'              => (int)$data['employee_contract_number'],
                                 'contract_date'                => $data['contract_date'],
-                                'professional_card_number'     => $data['professional_card_number'] ?? null, // opcional
-                                'professional_card_issue_date' => $data['professional_card_issue_date'] ?? null, // opcional
+                                'professional_card_number'     => $data['professional_card_number'] ?? null,
+                                'professional_card_issue_date' => $data['professional_card_issue_date'] ?? null,
                                 'employee_type_id'             => (int)$data['employee_type_id_planta'],
                                 'position_id'                  => (int)$data['position_id'],
                                 'risk_type'                    => $data['risk_type_employee'],
@@ -564,12 +556,10 @@ class CoordinationPeopleController extends Controller
                         );
                     }
 
-                    // en planta, contractorId debe quedar null (no aplica)
                     $contractorId = null;
+
                 } else {
 
-                    // CONTRATISTA:
-                    // Si tiene contrato activo, NO crear otro, solo usarlo para asignaciones
                     if (!$activeContractor) {
 
                         $hasAnyContractData =
@@ -606,28 +596,24 @@ class CoordinationPeopleController extends Controller
                         if (!$contractYear && $contractStart) $contractYear = Carbon::parse($contractStart)->year;
                         if (!$contractYear) $contractYear = (int)now()->year;
 
-                        // Campos NOT NULL de contractors según tu esquema
                         $missing = [];
-                        foreach (
-                            [
-                                'employee_type_id',
-                                'SIIF_code',
-                                'insurer_entity_id',
-                                'policy_number',
-                                'policy_issue_date',
-                                'policy_approval_date',
-                                'policy_effective_date',
-                                'policy_expiration_date',
-                                'risk_type',
-                            ] as $k
-                        ) {
+                        foreach ([
+                            'employee_type_id',
+                            'SIIF_code',
+                            'insurer_entity_id',
+                            'policy_number',
+                            'policy_issue_date',
+                            'policy_approval_date',
+                            'policy_effective_date',
+                            'policy_expiration_date',
+                            'risk_type',
+                        ] as $k) {
                             if (empty($data[$k])) $missing[] = $k;
                         }
                         if ($missing) {
                             throw new \RuntimeException('Faltan campos obligatorios del contrato: ' . implode(', ', $missing));
                         }
 
-                        // si se va a enviar correo y NO existe usuario, debemos tener un email
                         if ($sendEmail && !$existingUser) {
                             $candidateEmail = $data['user_email']
                                 ?? ($data['personal_email'] ?? ($data['misena_email'] ?? null));
@@ -667,7 +653,7 @@ class CoordinationPeopleController extends Controller
                         ]);
 
                         $contractorId = (int)$c->id;
-                        $activeContractor = $c; // para vigencias default
+                        $activeContractor = $c;
                     }
                 }
 
@@ -717,7 +703,6 @@ class CoordinationPeopleController extends Controller
                 }
 
                 // 4) Asignaciones area+rubro
-                // Defaults: si no mandan fechas de asignación, usa vigencia de contrato (si existe)
                 $start = $data['assignment_start_date']
                     ?? ($data['contract_start_date'] ?? ($activeContractor->contract_start_date ?? null));
 
@@ -731,17 +716,16 @@ class CoordinationPeopleController extends Controller
                 if ($makePrimary) {
                     DB::table('person_area_budget_assignments')
                         ->where('person_id', $person->id)
-                        ->where('area_id', $areaId)
+                        ->where('area_id', $data['area_id'])
                         ->where('is_primary', true)
                         ->update(['is_primary' => false, 'updated_at' => now()]);
                 }
 
                 foreach ($budgetItemIds as $budgetItemId) {
 
-                    // Si ya hay una activa igual, la cerramos (tu regla)
                     $activeSame = DB::table('person_area_budget_assignments')
                         ->where('person_id', $person->id)
-                        ->where('area_id', $areaId)
+                        ->where('area_id', $data['area_id'])
                         ->where('budget_item_id', $budgetItemId)
                         ->where('is_active', true)
                         ->first();
@@ -758,8 +742,8 @@ class CoordinationPeopleController extends Controller
 
                     DB::table('person_area_budget_assignments')->insert([
                         'person_id'      => $person->id,
-                        'contractor_id'  => $contractorId, // si es contratista con activo, ya viene; si planta, null
-                        'area_id'        => $areaId,
+                        'contractor_id'  => $contractorId,
+                        'area_id'        => $data['area_id'],
                         'budget_item_id' => $budgetItemId,
                         'supervisor_id'  => $supervisorUserId,
                         'start_date'     => $start,
@@ -771,22 +755,20 @@ class CoordinationPeopleController extends Controller
                     ]);
                 }
 
-                $areaName = (string) Area::where('id', $areaId)->value('name');
+                $areaName = (string) Area::where('id', $data['area_id'])->value('name');
                 $rubros   = BudgetItem::whereIn('id', $budgetItemIds)->orderBy('name')->pluck('name')->all();
 
                 return [
                     'person'       => $person,
-                    'user'         => $existingUser, // puede ser null si no se crea y no existía
+                    'user'         => $existingUser,
                     'area_name'    => $areaName,
                     'rubros'       => $rubros,
                     'created_user' => $createdUser,
                 ];
             });
 
-            // 5) Correo con magic link (fuera TX)
             if ($sendEmail) {
 
-                // Si no hay user, no podemos generar token. En ese caso: no fallar, solo avisar.
                 if (empty($result['user'])) {
                     $route = ($areaKey === 'academic')
                         ? 'gdf.academic.people.index'
@@ -825,17 +807,15 @@ class CoordinationPeopleController extends Controller
                 ? 'gdf.academic.people.index'
                 : 'gdf.campesena.people.index';
 
-            $msg = 'Registro guardado correctamente (asignación por rubros aplicada).';
-            if ($sendEmail) {
-                $msg .= ' Correo enviado con enlace para crear contraseña.';
-            }
+            $msg = 'Registro guardado correctamente (rubros filtrados por budgets).';
+            if ($sendEmail) $msg .= ' Correo enviado con enlace para crear contraseña.';
 
             return redirect()->route($route)->with('success', $msg);
+
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', $e->getMessage());
         }
     }
-
 
     /* =========================================================
      |  Roles (GDF + SIGAC)
@@ -846,10 +826,9 @@ class CoordinationPeopleController extends Controller
         $slugs = [];
 
         if (!empty($data['role_slug'])) {
-            $slugs[] = (string)$data['role_slug']; // ej: gdf.instructor / gdf.academic_support ...
+            $slugs[] = (string)$data['role_slug'];
         }
 
-        // Si quieres siempre este rol:
         $slugs[] = 'sigac.instructor';
 
         $slugs = array_values(array_unique(array_filter($slugs)));
@@ -860,92 +839,99 @@ class CoordinationPeopleController extends Controller
         }
     }
 
-    /* =========================================================
-     |  Login Token (compatible token_hash o token)
-     * ========================================================= */
-
-    private function createLoginTokenForUser(User $user): string
+    private function titleByArea(string $areaKey): string
     {
-        $plain = Str::random(64);
-
-        $payload = [
-            'user_id'    => $user->id,
-            'used_at'    => null,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ];
-
-        if (Schema::hasColumn('login_tokens', 'expires_at')) {
-            $payload['expires_at'] = now()->addHours(48);
-        }
-
-        if (Schema::hasColumn('login_tokens', 'token_hash')) {
-            $payload['token_hash'] = hash('sha256', $plain);
-        } else {
-            // fallback legacy
-            $payload['token'] = $plain;
-        }
-
-        DB::table('login_tokens')->insert($payload);
-
-        return $plain;
+        return $areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica';
     }
 
-    private function sendMagicLinkEmailWithRetry(
-        Person $person,
-        ?User $user,
-        string $areaName,
-        array $rubros,
-        string $plainToken,
-        int $retries = 3
-    ): bool {
-        $to = $user->email
-            ?? $person->personal_email
-            ?? $person->misena_email
-            ?? null;
+    private function routePrefixByRole(string $areaKey): string
+    {
+        $isSupport = $this->isSupportRoleForArea($areaKey);
 
-        if (!$to) return false;
-
-        $fullName = trim(($person->first_name ?? '') . ' ' . ($person->first_last_name ?? '') . ' ' . ($person->second_last_name ?? ''));
-        $rubrosTxt = !empty($rubros) ? implode(', ', $rubros) : '—';
-
-        // ✅ Ruta ÚNICA y oficial para contraseña (Security\PasswordController)
-        $url = route('gdf.security.magic', ['token' => $plainToken]);
-
-        $subject = "Acceso y creación de contraseña - {$areaName}";
-        $lines = [
-            "Hola {$fullName},",
-            "",
-            "Se registró tu asignación en el sistema.",
-            "Área: {$areaName}",
-            "Rubros: {$rubrosTxt}",
-            "",
-            "Para ingresar, define tu contraseña aquí:",
-            $url,
-            "",
-            "Este enlace expira y solo se puede usar una vez.",
-            "Si no solicitaste esto, ignora este correo.",
-        ];
-
-        $body = implode("\n", $lines);
-
-        for ($i = 1; $i <= max(1, $retries); $i++) {
-            try {
-                Mail::raw($body, function ($msg) use ($to, $subject) {
-                    $msg->to($to)->subject($subject);
-                });
-                return true;
-            } catch (\Throwable $e) {
-                usleep(200000); // 0.2s
-            }
+        if ($isSupport) {
+            return $areaKey === 'campesena' ? 'gdf.support.campesena' : 'gdf.support.academic';
         }
 
-        return false;
+        return $areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic';
     }
 
-    /* =========================================================
-     |  Queries / helpers
-     * ========================================================= */
+    private function isSupportRoleForArea(string $areaKey): bool
+    {
+        if (!function_exists('checkRol')) return false;
+
+        if ($areaKey === 'campesena') {
+            return checkRol('gdf.campesena_support') || checkRol('gdf.superadmin');
+        }
+        return checkRol('gdf.academic_support') || checkRol('gdf.superadmin');
+    }
+
+    private function authorizeAcademicOrSupport(): void
+    {
+        if (!function_exists('checkRol')) abort(403);
+
+        if (
+            !checkRol('gdf.academic_coordinator') &&
+            !checkRol('gdf.academic_support') &&
+            !checkRol('gdf.superadmin')
+        ) {
+            abort(403);
+        }
+    }
+
+    private function authorizeCampesenaOrSupport(): void
+    {
+        if (!function_exists('checkRol')) abort(403);
+
+        if (
+            !checkRol('gdf.campesena_coordinator') &&
+            !checkRol('gdf.campesena_support') &&
+            !checkRol('gdf.superadmin')
+        ) {
+            abort(403);
+        }
+    }
+
+    private function authorizeByArea(string $areaKey): void
+    {
+        if ($areaKey === 'campesena') $this->authorizeCampesenaOrSupport();
+        else $this->authorizeAcademicOrSupport();
+    }
+
+    private function areaKeyFromPath(Request $request): string
+    {
+        $path = $request->path();
+        return str_contains($path, 'campesena') ? 'campesena' : 'academic';
+    }
+
+    private function allowedAreaIds(string $areaKey): array
+    {
+        $ids = (array) config("gdf.area_groups.$areaKey", []);
+        return array_values(array_filter(array_map('intval', $ids)));
+    }
+
+    /**
+     * ✅ Fuente oficial de "rubros disponibles": budgets (por area + year).
+     */
+    private function allowedBudgetItemIdsByArea(int $areaId, int $year): array
+    {
+        if (!Schema::hasTable('budgets')) return [];
+
+        return DB::table('budgets')
+            ->where('area_id', $areaId)
+            ->where('year', $year)
+            ->where('active', 1)
+            ->pluck('budget_item_id')
+            ->map(fn($x) => (int)$x)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function defaultNickname(string $firstName, string $doc): string
+    {
+        $base = Str::upper(Str::substr(preg_replace('/\s+/', '', $firstName), 0, 3));
+        return $base . $doc;
+    }
 
     private function buildAssignmentsQuery(int $areaId, array $allowedBudgetItemIds, bool $onlyActive, string $q, int $budgetItemId = 0)
     {
@@ -1008,49 +994,80 @@ class CoordinationPeopleController extends Controller
         return ['working_days' => $workingDaysNeeded, 'end_date' => $date->toDateString()];
     }
 
-    private function authorizeAcademicOrSupport(): void
+    private function createLoginTokenForUser(User $user): string
     {
-        if (!function_exists('checkRol')) abort(403);
-        if (!checkRol('gdf.academic_coordinator') && !checkRol('gdf.academic_support')) abort(403);
+        $plain = Str::random(64);
+
+        $payload = [
+            'user_id'    => $user->id,
+            'used_at'    => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        if (Schema::hasColumn('login_tokens', 'expires_at')) {
+            $payload['expires_at'] = now()->addHours(48);
+        }
+
+        if (Schema::hasColumn('login_tokens', 'token_hash')) {
+            $payload['token_hash'] = hash('sha256', $plain);
+        } else {
+            $payload['token'] = $plain;
+        }
+
+        DB::table('login_tokens')->insert($payload);
+
+        return $plain;
     }
 
-    private function authorizeCampesenaOrSupport(): void
-    {
-        if (!function_exists('checkRol')) abort(403);
-        if (!checkRol('gdf.campesena_coordinator') && !checkRol('gdf.campesena_support')) abort(403);
-    }
+    private function sendMagicLinkEmailWithRetry(
+        Person $person,
+        ?User $user,
+        string $areaName,
+        array $rubros,
+        string $plainToken,
+        int $retries = 3
+    ): bool {
+        $to = $user->email
+            ?? $person->personal_email
+            ?? $person->misena_email
+            ?? null;
 
-    private function authorizeByArea(string $areaKey): void
-    {
-        if ($areaKey === 'campesena') $this->authorizeCampesenaOrSupport();
-        else $this->authorizeAcademicOrSupport();
-    }
+        if (!$to) return false;
 
-    private function areaKeyFromPath(Request $request): string
-    {
-        return str_contains($request->path(), 'gdf/campesena') ? 'campesena' : 'academic';
-    }
+        $fullName = trim(($person->first_name ?? '') . ' ' . ($person->first_last_name ?? '') . ' ' . ($person->second_last_name ?? ''));
+        $rubrosTxt = !empty($rubros) ? implode(', ', $rubros) : '—';
 
-    private function allowedAreaIds(string $areaKey): array
-    {
-        $ids = (array) config("gdf.area_groups.$areaKey", []);
-        return array_values(array_filter(array_map('intval', $ids)));
-    }
+        $url = route('gdf.security.magic', ['token' => $plainToken]);
 
-    private function allowedBudgetItemIdsByArea(int $areaId): array
-    {
-        return DB::table('area_budget_items')
-            ->where('area_id', $areaId)
-            ->where('active', true)
-            ->pluck('budget_item_id')
-            ->map(fn($x) => (int)$x)
-            ->values()
-            ->all();
-    }
+        $subject = "Acceso y creación de contraseña - {$areaName}";
+        $lines = [
+            "Hola {$fullName},",
+            "",
+            "Se registró tu asignación en el sistema.",
+            "Área: {$areaName}",
+            "Rubros: {$rubrosTxt}",
+            "",
+            "Para ingresar, define tu contraseña aquí:",
+            $url,
+            "",
+            "Este enlace expira y solo se puede usar una vez.",
+            "Si no solicitaste esto, ignora este correo.",
+        ];
 
-    private function defaultNickname(string $firstName, string $doc): string
-    {
-        $base = Str::upper(Str::substr(preg_replace('/\s+/', '', $firstName), 0, 3));
-        return $base . $doc;
+        $body = implode("\n", $lines);
+
+        for ($i = 1; $i <= max(1, $retries); $i++) {
+            try {
+                Mail::raw($body, function ($msg) use ($to, $subject) {
+                    $msg->to($to)->subject($subject);
+                });
+                return true;
+            } catch (\Throwable $e) {
+                usleep(200000);
+            }
+        }
+
+        return false;
     }
 }

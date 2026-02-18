@@ -1,275 +1,296 @@
+{{-- Modules/GDF/Resources/views/coordination/dashboard.blade.php --}}
 @extends('gdf::layouts.masteruser')
-@section('title', 'GDF | ' . ($title ?? 'Coordinación') . ' - Revisión')
+@section('title', 'GDF | ' . ($title ?? 'Coordinación'))
 
 @section('content')
 @php
-    $areaKey = $areaKey ?? (str_contains(request()->path(), 'gdf/campesena') ? 'campesena' : 'academic');
+  use Illuminate\Support\Str;
+  use Illuminate\Support\Carbon;
+  use Illuminate\Support\Facades\Route;
 
-    $isOk = function_exists('checkRol')
-        ? ($areaKey === 'campesena'
-            ? (checkRol('gdf.campesena_coordinator') || checkRol('gdf.campesena_support'))
-            : (checkRol('gdf.academic_coordinator') || checkRol('gdf.academic_support')))
-        : false;
-    if(!$isOk){ abort(403); }
+  $path = request()->path();
+  $areaKey = $areaKey ?? (Str::contains($path, 'campesena') ? 'campesena' : 'academic');
 
-    $routePrefix = $routePrefix ?? $areaKey; // academic|campesena
-    $title = $title ?? ($areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica');
+  $isAllowed = function_exists('checkRol')
+      ? ($areaKey === 'campesena'
+          ? (checkRol('gdf.campesena_coordinator') || checkRol('gdf.campesena_support') || checkRol('gdf.superadmin'))
+          : (checkRol('gdf.academic_coordinator') || checkRol('gdf.academic_support') || checkRol('gdf.superadmin')))
+      : false;
+  if(!$isAllowed) abort(403);
 
-    $q   = $q ?? request('q', '');
-    $tab = $tab ?? request('tab', 'gdf');
-    if(!in_array($tab, ['gdf','sitrav'], true)) $tab = 'gdf';
+  $routePrefix = $routePrefix ?? ($areaKey === 'campesena' ? 'gdf.campesena' : 'gdf.academic');
+  $title = $title ?? ($areaKey === 'campesena' ? 'Coordinación Campesena' : 'Coordinación Académica');
 
-    $fmtMoney = fn($n) => '$ ' . number_format((float)($n ?? 0), 0, ',', '.');
+  $routeExists = fn(string $name) => Route::has($name);
 
-    $gdfCount    = $gdfCount ?? null;
-    $sitravCount = $sitravCount ?? null;
+  $reviewRoute = $routePrefix.'.review';
 
-    $requests       = $requests ?? collect();
-    $sitravRequests = $sitravRequests ?? collect();
+  $badgeStatus = function(?string $s){
+      $s = strtolower(trim((string)$s));
+      return match($s){
+          'submitted'            => 'text-bg-warning',
+          'returned'             => 'text-bg-secondary',
+          'approved_by_treasury' => 'text-bg-info',
+          'approved'             => 'text-bg-primary',
+          'executed'             => 'text-bg-success',
+          'rejected'             => 'text-bg-danger',
+          'cancelled'            => 'text-bg-dark',
+          'draft'                => 'text-bg-dark',
+          default                => 'text-bg-secondary',
+      };
+  };
 
-    $isPaginator = fn($x) => is_object($x) && method_exists($x, 'links') && method_exists($x, 'appends');
+  $fmtDate = function($d){
+      if(!$d) return '—';
+      try { return Carbon::parse($d)->format('d/m/Y'); }
+      catch (\Throwable $e) { return (string)$d; }
+  };
 
-    $hasAssign = \Illuminate\Support\Facades\Route::has($routePrefix.'.motorcycles.assign.create');
-    $hasQuota  = \Illuminate\Support\Facades\Route::has($routePrefix.'.motorcycles.quota_status');
+  $kpis = $kpis ?? [
+      'pending_coord' => 0,
+      'returned'      => 0,
+      'scheduled'     => 0,
+  ];
 
-    // Dataset activo (unificamos tabla)
-    $rows = $tab === 'gdf' ? $requests : $sitravRequests;
+  $quickRequests = $quickRequests ?? collect();
+  $requests      = $requests ?? null;
+
+  // ✅ Helpers de display (fallback robusto)
+  $personName = function($r){
+      if(isset($r->person_display) && $r->person_display) return $r->person_display;
+
+      if(isset($r->person) && $r->person){
+          $p = $r->person;
+          $nm = trim(($p->first_name ?? '').' '.($p->first_last_name ?? '').' '.($p->second_last_name ?? ''));
+          if($nm !== '') return $nm;
+      }
+
+      return (string)($r->applicant_display ?? $r->applicant_name ?? $r->instructor_name ?? ('Persona #'.((int)($r->person_id ?? 0) ?: '—')));
+  };
+
+  $rubroName = function($r){
+      if(isset($r->rubro_display) && $r->rubro_display) return $r->rubro_display;
+
+      if(isset($r->budgetItem) && $r->budgetItem){
+          return trim(($r->budgetItem->code ?? '').' - '.($r->budgetItem->name ?? 'Rubro'));
+      }
+
+      $bid = (int)($r->budget_item_id ?? 0);
+      return $bid > 0 ? "Rubro #{$bid}" : '—';
+  };
+
+  $destName = function($r){
+      if(isset($r->destination_display) && $r->destination_display) return $r->destination_display;
+
+      // si tienes relaciones municipio/vereda en TravelRequest
+      if(isset($r->village) && $r->village) return $r->village->name ?? ($r->destination ?? '—');
+      if(isset($r->municipality) && $r->municipality) return $r->municipality->name ?? ($r->destination ?? '—');
+
+      return (string)($r->destination ?? '—');
+  };
 @endphp
 
 <div class="container py-4">
 
-    {{-- Header --}}
-    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-        <div>
-            <div class="text-muted small">GDF / {{ $title }}</div>
-            <h4 class="mb-1">{{ $title }}</h4>
-            <div class="text-muted small">
-                Área: <strong>{{ $areaKey }}</strong> · Revisión de solicitudes (GDF/SITRAV) y accesos operativos.
-            </div>
-        </div>
-
-        <div class="d-flex flex-wrap gap-2">
-            <a href="{{ route($routePrefix.'.people.index') }}" class="btn btn-outline-secondary">
-                Personas asignadas
-            </a>
-            <a href="{{ route($routePrefix.'.people.create') }}" class="btn btn-outline-primary">
-                + Registrar persona
-            </a>
-
-            @if($hasAssign)
-                <a href="{{ route($routePrefix.'.motorcycles.assign.create', ['area'=>$areaKey, 'year'=>now()->year]) }}"
-                   class="btn btn-primary">
-                    Gestión de motos
-                </a>
-            @endif
-        </div>
-    </div>
-
-    {{-- Alerts --}}
-    @foreach (['success'=>'success','warning'=>'warning','info'=>'info','error'=>'danger'] as $k=>$type)
-        @if(session($k))
-            <div class="alert alert-{{ $type }} border-0 shadow-sm">{{ session($k) }}</div>
-        @endif
-    @endforeach
-
-    @if ($errors->any())
-        <div class="alert alert-warning border-0 shadow-sm">
-            <ul class="mb-0">@foreach($errors->all() as $e)<li>{{ $e }}</li>@endforeach</ul>
-        </div>
+  {{-- Alerts --}}
+  @foreach (['success','error','warning','info'] as $k)
+    @if(session($k))
+      <div class="alert alert-{{ $k==='error' ? 'danger' : $k }} mb-3">
+        {{ session($k) }}
+      </div>
     @endif
+  @endforeach
 
-    {{-- Accesos rápidos --}}
-    <div class="row g-3 mb-3">
-        <div class="col-lg-6">
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="fw-bold mb-1">Personas</div>
-                    <div class="text-muted small mb-3">Administración de personas vinculadas al área.</div>
-                    <div class="d-flex gap-2 flex-wrap">
-                        <a class="btn btn-outline-secondary" href="{{ route($routePrefix.'.people.index') }}">Ver personas</a>
-                        <a class="btn btn-outline-primary" href="{{ route($routePrefix.'.people.create') }}">Registrar</a>
-                    </div>
-                </div>
-            </div>
+  {{-- Header --}}
+  <div class="gdf-card p-4 mb-4" style="background:rgba(255,255,255,.03);">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+      <div>
+        <div class="text-white-50 small mb-1">GDF / {{ $title }}</div>
+        <h3 class="fw-bold mb-1">Panel de Coordinación</h3>
+        <div class="text-white-50">
+          Área: <span class="fw-semibold text-white">{{ $areaKey==='campesena' ? 'Campesena' : 'Académica' }}</span>
         </div>
+      </div>
 
-        <div class="col-lg-6">
-            <div class="card shadow-sm h-100">
-                <div class="card-body">
-                    <div class="fw-bold mb-1">Motos</div>
-                    <div class="text-muted small mb-3">Crear/asignar (coord/apoyo) y ver diagnóstico de cupo.</div>
-                    <div class="d-flex gap-2 flex-wrap">
-                        @if($hasAssign)
-                            <a class="btn btn-primary"
-                               href="{{ route($routePrefix.'.motorcycles.assign.create', ['area'=>$areaKey, 'year'=>now()->year]) }}">
-                                Abrir gestión
-                            </a>
-                        @else
-                            <button class="btn btn-primary" disabled>Ruta no disponible</button>
-                        @endif
-                    </div>
-                </div>
-            </div>
-        </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center" style="position:relative; z-index:5;">
+        @if($routeExists($reviewRoute))
+          <a class="btn btn-gdf-ghost" href="{{ route($reviewRoute) }}">
+            <i class="bi bi-clipboard-check"></i> Revisión
+          </a>
+        @endif
+
+        @if($routeExists($routePrefix.'.people.index'))
+          <a class="btn btn-gdf-ghost" href="{{ route($routePrefix.'.people.index') }}">
+            <i class="bi bi-people"></i> Personas
+          </a>
+        @endif
+
+        @if($routeExists($routePrefix.'.motorcycles.index'))
+          <a class="btn btn-gdf-ghost" href="{{ route($routePrefix.'.motorcycles.index') }}">
+            <i class="bi bi-bicycle"></i> Motos
+          </a>
+        @endif
+      </div>
+    </div>
+  </div>
+
+  {{-- KPIs --}}
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="gdf-card p-3" style="background:rgba(255,255,255,.03);">
+        <div class="text-white-50 small">Pendiente Coordinación</div>
+        <div class="fs-3 fw-bold">{{ $kpis['pending_coord'] ?? 0 }}</div>
+        @if($routeExists($reviewRoute))
+          <div class="small text-white-50 mt-2">
+            <a class="text-decoration-none text-white-50" href="{{ route($reviewRoute) }}">
+              Abrir revisión <i class="bi bi-chevron-right"></i>
+            </a>
+          </div>
+        @endif
+      </div>
     </div>
 
-    {{-- Tabs + filtro (misma fila) --}}
-    <div class="card shadow-sm mb-3">
-        <div class="card-body">
-            <div class="d-flex flex-wrap justify-content-between align-items-end gap-3">
-
-                <ul class="nav nav-pills">
-                    <li class="nav-item">
-                        <a class="nav-link {{ $tab==='gdf' ? 'active' : '' }}"
-                           href="{{ route($routePrefix.'.review', ['tab'=>'gdf','q'=>$q]) }}">
-                            GDF
-                            @if($gdfCount !== null)
-                                <span class="badge bg-light text-dark ms-1">{{ $gdfCount }}</span>
-                            @endif
-                        </a>
-                    </li>
-                    <li class="nav-item ms-2">
-                        <a class="nav-link {{ $tab==='sitrav' ? 'active' : '' }}"
-                           href="{{ route($routePrefix.'.review', ['tab'=>'sitrav','q'=>$q]) }}">
-                            SITRAV
-                            @if($sitravCount !== null)
-                                <span class="badge bg-light text-dark ms-1">{{ $sitravCount }}</span>
-                            @endif
-                        </a>
-                    </li>
-                </ul>
-
-                <form method="GET" action="{{ route($routePrefix.'.review') }}" class="ms-auto" style="min-width:320px;">
-                    <input type="hidden" name="tab" value="{{ $tab }}">
-                    <label class="form-label small mb-1">Buscar</label>
-                    <div class="input-group">
-                        <input name="q" value="{{ $q }}" class="form-control"
-                               placeholder="Origen, destino, ID, cédula">
-                        <button class="btn btn-primary">Filtrar</button>
-                    </div>
-                    <div class="form-text">
-                        Vista: <strong>{{ strtoupper($tab) }}</strong>
-                    </div>
-                </form>
-
-            </div>
-        </div>
+    <div class="col-md-4">
+      <div class="gdf-card p-3" style="background:rgba(255,255,255,.03);">
+        <div class="text-white-50 small">Devueltas</div>
+        <div class="fs-3 fw-bold">{{ $kpis['returned'] ?? 0 }}</div>
+      </div>
     </div>
 
-    {{-- Tabla unificada --}}
-    <div class="card shadow-sm">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center">
-            <div class="fw-bold">
-                {{ $tab === 'gdf'
-                    ? 'Solicitudes GDF pendientes de Coordinación'
-                    : 'Solicitudes SITRAV pendientes de Coordinación' }}
-            </div>
-            <div class="text-muted small">{{ $title }} · {{ $areaKey }}</div>
+    <div class="col-md-4">
+      <div class="gdf-card p-3" style="background:rgba(255,255,255,.03);">
+        <div class="text-white-50 small">Agendadas</div>
+        <div class="fs-3 fw-bold">{{ $kpis['scheduled'] ?? 0 }}</div>
+      </div>
+    </div>
+  </div>
+
+  {{-- Bandeja --}}
+  <div class="row g-3">
+    <div class="col-12">
+      <div class="gdf-card p-4" style="background:rgba(255,255,255,.03);">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <div class="fw-semibold">Bandeja rápida</div>
+            <div class="text-white-50 small">Pendiente Coordinación (top 8)</div>
+          </div>
+
+          @if($routeExists($reviewRoute))
+            <a class="btn btn-sm btn-gdf-ghost" href="{{ route($reviewRoute) }}">
+              Ver revisión <i class="bi bi-chevron-right"></i>
+            </a>
+          @endif
         </div>
 
-        <div class="table-responsive">
-            <table class="table table-striped align-middle mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th style="width:90px">ID</th>
-                        <th>{{ $tab === 'gdf' ? 'Ruta' : 'Detalle' }}</th>
-                        <th style="width:210px">Fechas</th>
-                        <th style="width:160px" class="text-end">Total</th>
-                        <th style="width:380px">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                @forelse($rows as $r)
-                    @php
-                        $uid = ($tab === 'gdf' ? 'gdf' : 'sitr') . $r->id;
-                    @endphp
-
-                    <tr>
-                        <td class="fw-semibold">#{{ $r->id }}</td>
-
-                        <td>
-                            <div class="fw-semibold">{{ $r->origin ?? '—' }} → {{ $r->destination ?? '—' }}</div>
-                            <small class="text-muted">
-                                {{ $r->request_type ?? ($tab === 'sitrav' ? 'SITRAV' : '—') }}
-                                @if(isset($r->budget_item_id)) · Rubro #{{ $r->budget_item_id }} @endif
-                            </small>
-                        </td>
-
-                        <td>
-                            <div class="small">{{ $r->start_date ?? '—' }} → {{ $r->end_date ?? '—' }}</div>
-                        </td>
-
-                        <td class="text-end fw-semibold">
-                            {{ $fmtMoney($r->total_amount ?? $r->amount ?? 0) }}
-                        </td>
-
-                        <td>
-                            <form method="POST" action="{{ route($routePrefix.'.review.approve', $r->id) }}" class="d-inline">
-                                @csrf
-                                <button class="btn btn-success btn-sm">Aprobar</button>
-                            </form>
-
-                            <button class="btn btn-info btn-sm" data-bs-toggle="collapse" data-bs-target="#ret{{ $uid }}">
-                                Devolver
-                            </button>
-
-                            <button class="btn btn-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#rej{{ $uid }}">
-                                Rechazar
-                            </button>
-
-                            <div class="collapse mt-2" id="ret{{ $uid }}">
-                                <form method="POST" action="{{ route($routePrefix.'.review.return', $r->id) }}">
-                                    @csrf
-                                    <div class="input-group input-group-sm">
-                                        <select name="target" class="form-select" required>
-                                            <option value="support">Apoyo</option>
-                                            <option value="applicant">Solicitante</option>
-                                        </select>
-                                        <input name="comment" class="form-control" placeholder="Motivo" required maxlength="2000">
-                                        <button class="btn btn-outline-dark">Enviar</button>
-                                    </div>
-                                </form>
-                            </div>
-
-                            <div class="collapse mt-2" id="rej{{ $uid }}">
-                                <form method="POST" action="{{ route($routePrefix.'.review.reject', $r->id) }}">
-                                    @csrf
-                                    <div class="input-group input-group-sm">
-                                        <input name="comment" class="form-control" placeholder="Motivo" required maxlength="2000">
-                                        <button class="btn btn-outline-dark">Rechazar</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                @empty
-                    <tr>
-                        <td colspan="5" class="text-center text-muted py-4">
-                            No hay solicitudes {{ strtoupper($tab) }} pendientes.
-                        </td>
-                    </tr>
-                @endforelse
-                </tbody>
+        @if(($quickRequests ?? collect())->isEmpty())
+          <div class="mt-3 p-3 rounded" style="background:rgba(255,255,255,.04);">
+            <div class="text-white-50">
+              <i class="bi bi-check2-circle me-2"></i>
+              No hay solicitudes pendientes.
+            </div>
+          </div>
+        @else
+          <div class="table-responsive mt-3">
+            <table class="table table-dark table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th style="width:90px;">#</th>
+                  <th style="width:260px;">Estado</th>
+                  <th>Solicitante</th>
+                  <th>Destino</th>
+                  <th style="width:260px;">Rubro</th>
+                  <th style="width:190px;">Fechas</th>
+                  <th class="text-end" style="width:130px;">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach($quickRequests as $r)
+                  @php $st = (string)($r->status ?? ''); @endphp
+                  <tr>
+                    <td class="fw-semibold">{{ $r->id }}</td>
+                    <td>
+                      <span class="badge {{ $badgeStatus($st) }}">
+                        {{ \Modules\GDF\Entities\TravelRequest::statusLabel($st) }}
+                      </span>
+                      <div class="small text-white-50 mt-1">Código: {{ $st ?: '—' }}</div>
+                    </td>
+                    <td>{{ $personName($r) }}</td>
+                    <td>{{ $destName($r) }}</td>
+                    <td class="small text-white-50">{{ $rubroName($r) }}</td>
+                    <td class="small text-white-50">
+                      {{ $fmtDate($r->start_date ?? null) }} → {{ $fmtDate($r->end_date ?? null) }}
+                    </td>
+                    <td class="text-end">
+                      @if($routeExists($reviewRoute))
+                        <a class="btn btn-sm btn-gdf-ghost" href="{{ route($reviewRoute, ['q'=>$r->id]) }}">
+                          Revisar <i class="bi bi-chevron-right"></i>
+                        </a>
+                      @endif
+                    </td>
+                  </tr>
+                @endforeach
+              </tbody>
             </table>
-        </div>
+          </div>
+        @endif
 
-        {{-- Paginación --}}
-        <div class="card-footer bg-white">
-            @if($tab === 'gdf')
-                @if($isPaginator($requests))
-                    {{ $requests->appends(request()->query())->links() }}
-                @else
-                    <span class="text-muted small">Sin paginación.</span>
-                @endif
-            @else
-                @if($isPaginator($sitravRequests))
-                    {{ $sitravRequests->appends(request()->query())->links() }}
-                @else
-                    <span class="text-muted small">Sin paginación.</span>
-                @endif
-            @endif
-        </div>
+        {{-- Listado completo --}}
+        @if($requests)
+          <hr class="my-4" style="opacity:.15;">
+          <div class="fw-semibold mb-2">Listado completo (paginado)</div>
+
+          <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th style="width:90px;">#</th>
+                  <th style="width:260px;">Estado</th>
+                  <th>Solicitante</th>
+                  <th>Destino</th>
+                  <th style="width:260px;">Rubro</th>
+                  <th style="width:190px;">Fechas</th>
+                  <th class="text-end" style="width:130px;">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach($requests as $r)
+                  @php $st = (string)($r->status ?? ''); @endphp
+                  <tr>
+                    <td class="fw-semibold">{{ $r->id }}</td>
+                    <td>
+                      <span class="badge {{ $badgeStatus($st) }}">
+                        {{ \Modules\GDF\Entities\TravelRequest::statusLabel($st) }}
+                      </span>
+                      <div class="small text-white-50 mt-1">Código: {{ $st ?: '—' }}</div>
+                    </td>
+                    <td>{{ $personName($r) }}</td>
+                    <td>{{ $destName($r) }}</td>
+                    <td class="small text-white-50">{{ $rubroName($r) }}</td>
+                    <td class="small text-white-50">
+                      {{ $fmtDate($r->start_date ?? null) }} → {{ $fmtDate($r->end_date ?? null) }}
+                    </td>
+                    <td class="text-end">
+                      @if($routeExists($reviewRoute))
+                        <a class="btn btn-sm btn-gdf-ghost" href="{{ route($reviewRoute, ['q'=>$r->id]) }}">
+                          Revisar <i class="bi bi-chevron-right"></i>
+                        </a>
+                      @endif
+                    </td>
+                  </tr>
+                @endforeach
+              </tbody>
+            </table>
+          </div>
+
+          <div class="mt-3">
+            {{ $requests->links() }}
+          </div>
+        @endif
+
+      </div>
     </div>
+  </div>
 
 </div>
 @endsection

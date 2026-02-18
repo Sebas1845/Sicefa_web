@@ -30,6 +30,6 @@ class ProgramRequestStatusMail extends Mailable
                 'GDF/SITRAV - SICEFA'
             )
             ->subject($subjects[$this->type] ?? "SICEFA | Solicitud #{$this->pr->id}")
-            ->view('sigac::emails.program_request_status');
+            ->view('sigac::emails.ProgramRequestStatus.program_request_status');
     }
 }

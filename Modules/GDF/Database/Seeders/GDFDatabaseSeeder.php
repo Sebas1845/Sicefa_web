@@ -10,9 +10,9 @@ class GDFDatabaseSeeder extends Seeder
     public function run(): void
     {
         DB::transaction(function () {
-            $this->call(AppTableSeeder::class);
-            $this->call(RolesTableSeeder::class);
-            //$this->call(PermissionsTableSeeder::class);
+            //$this->call(AppTableSeeder::class);
+            //$this->call(RolesTableSeeder::class);
+            $this->call(PermissionsTableSeeder::class);
 
             // Catálogos propios del módulo (areas/budget_items/per_diem_levels)
             //$this->call(GDFCatalogsSeeder::class);

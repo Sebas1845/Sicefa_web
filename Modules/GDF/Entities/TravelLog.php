@@ -27,5 +27,9 @@ class TravelLog extends Model
     {
         return $this->belongsTo(\App\Models\User::class);
     }
+    public function travelRequest()
+    {
+        return $this->belongsTo(TravelRequest::class, 'travel_request_id');
+    }
 }
 

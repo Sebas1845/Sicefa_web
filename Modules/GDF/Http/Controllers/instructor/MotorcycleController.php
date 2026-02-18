@@ -15,15 +15,16 @@ class MotorcycleController extends BaseOfficialController
         $ctx = session('gdf_context', []);
         $this->assertOfficialContext($ctx);
 
-        $personId = (int) (Auth::user()->person_id ?? 0);
-        if (!$personId) abort(403, 'User has no person_id.');
+        $personId = $this->personId();
+        if (!$personId) return redirect()->route('gdf.gateway')->with('warning', 'Selecciona contexto.');
+
 
         $areaIds = $this->areaIdsByKey($ctx['area']);
 
         $active = MotorcycleAssignment::with(['motorcycle', 'area', 'budgetItem'])
             ->where('person_id', $personId)
             ->whereIn('area_id', $areaIds)
-            ->whereIn('status', ['approved','delivered'])
+            ->whereIn('status', ['approved', 'delivered'])
             ->latest()
             ->first();
 
@@ -54,7 +55,7 @@ class MotorcycleController extends BaseOfficialController
 
         $hasBlocking = MotorcycleAssignment::where('person_id', $personId)
             ->whereIn('area_id', $areaIds)
-            ->whereIn('status', ['pending','approved','delivered'])
+            ->whereIn('status', ['pending', 'approved', 'delivered'])
             ->exists();
 
         if ($hasBlocking) {
@@ -124,7 +125,7 @@ class MotorcycleController extends BaseOfficialController
         $active = DB::table('motorcycle_assignments')
             ->where('person_id', $personId)
             ->whereIn('area_id', $areaIds)
-            ->whereIn('status', ['approved','delivered'])
+            ->whereIn('status', ['approved', 'delivered'])
             ->orderByDesc('id')
             ->first();
 
@@ -138,9 +139,9 @@ class MotorcycleController extends BaseOfficialController
     private function buildRequestMetaNotes(array $data): string
     {
         $parts = [];
-        if (!empty($data['start_date'])) $parts[] = 'Inicio solicitado: '.$data['start_date'];
-        if (!empty($data['end_date'])) $parts[] = 'Fin solicitado: '.$data['end_date'];
-        $parts[] = 'Motivo: '.$data['reason'];
+        if (!empty($data['start_date'])) $parts[] = 'Inicio solicitado: ' . $data['start_date'];
+        if (!empty($data['end_date'])) $parts[] = 'Fin solicitado: ' . $data['end_date'];
+        $parts[] = 'Motivo: ' . $data['reason'];
         return implode("\n", $parts);
     }
 }

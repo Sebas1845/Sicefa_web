@@ -151,7 +151,8 @@ public function getopstions()
         
         $supervisor_id = $formData['supervisorId'];
         $contract_number = $formData['contractNumber'];
-        $contract_year = $formData['contractYear'];
+        $contract_date = $formData['contractDate'];
+
         $contract_start_date = $formData['contractStartDate'];
         $contract_end_date = $formData['contractEndDate'];
         $total_contract_value = $formData['totalContractValue'];
@@ -176,7 +177,7 @@ public function getopstions()
             'person_id' => $person->id,
             'supervisor_id' => $supervisor_id,
             'contract_number' => $contract_number,
-            'contract_year' => $contract_year,
+            'contract_date' => $contract_date,
             'contract_start_date' => $contract_start_date,
             'contract_end_date' => $contract_end_date,
             'total_contract_value' => $total_contract_value,

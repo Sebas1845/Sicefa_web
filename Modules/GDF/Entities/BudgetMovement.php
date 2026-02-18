@@ -10,10 +10,21 @@ class BudgetMovement extends Model
     use HasFactory;
 
     protected $table = 'budget_movements';
-    public $timestamps = false; // only created_at
+
+    public $timestamps = false; // solo created_at
 
     protected $fillable = [
-        'budget_id', 'travel_request_id', 'type', 'amount', 'description', 'created_by', 'created_at',
+        'budget_id',
+        'area_id',
+        'travel_request_id',
+        'module',
+        'type',
+        'amount',
+        'description',
+        'created_by',
+        'source_type',
+        'source_id',
+        'created_at',
     ];
 
     protected $casts = [

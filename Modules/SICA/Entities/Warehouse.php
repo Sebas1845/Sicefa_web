@@ -38,8 +38,8 @@ class Warehouse extends Model implements Auditable
     public function app(){ // Accede a la información de la aplicación al que pertenece
         return $this->belongsTo(App::class);
     }
-    public function productive_unit_warehouses(){ // Accede a todos los registros de unidad productiva y bodega que pertenecen a esta bodega
-        return $this->hasMany(ProductiveUnitWarehouse::class);
+    public function productive_units_warehouses(){ // Accede a todos los registros de unidad productiva y bodega que pertenecen a esta bodega
+        return $this->hasMany(ProductiveUnitsWarehouse::class);
     }
 
     public function environment_warehouses(){ // Accede a todos los registros de unidad productiva y bodega que pertenecen a esta bodega
